@@ -383,16 +383,18 @@ def sync_directory(
         api_key=api_key,
     )
     kb_data_raw = kb_response.json()
-    
+
     # Validate knowledge base response
-    kb_validated = validate_response(kb_data_raw, KnowledgeBase, f"knowledge base {kb_id}")
+    kb_validated = validate_response(
+        kb_data_raw, KnowledgeBase, f"knowledge base {kb_id}"
+    )
     if kb_validated:
         kb_files = kb_validated.files or []
     else:
         # Fallback to raw data if validation fails
         logger.warning("Using raw knowledge base data due to validation failure")
         kb_files = kb_data_raw.get("files", [])
-    
+
     logger.info(f"Knowledge base contains {len(kb_files)} files")
 
     # Step 3: Get all files to build hash map and reuse map
@@ -401,7 +403,7 @@ def sync_directory(
         method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
     )
     all_files_raw = all_files_response.json()
-    
+
     # Validate each file in the response
     all_files = []
     for file_data in all_files_raw:
@@ -454,7 +456,7 @@ def sync_directory(
             kb_file = kb_file_data.model_dump()
         else:
             kb_file = kb_file_data
-        
+
         encoded_name = kb_file.get("meta", {}).get("name", "")
         decoded_name = decode_filename(encoded_name, kbdir_id)
 

@@ -27,8 +27,12 @@ class AccessControl(BaseModel):
         Write access permissions with group_ids and user_ids lists
     """
 
-    read: Dict[str, List[str]] = Field(default_factory=lambda: {"group_ids": [], "user_ids": []})
-    write: Dict[str, List[str]] = Field(default_factory=lambda: {"group_ids": [], "user_ids": []})
+    read: Dict[str, List[str]] = Field(
+        default_factory=lambda: {"group_ids": [], "user_ids": []}
+    )
+    write: Dict[str, List[str]] = Field(
+        default_factory=lambda: {"group_ids": [], "user_ids": []}
+    )
 
 
 class User(BaseModel):
