@@ -588,22 +588,14 @@ def sync(base_url, api_key, kb_id, kbdir_id, file_regex, directory):
     locally or have different content will be deleted. All local files will be
     uploaded or updated as needed.
     """
-    try:
-        sync_directory(
-            directory=directory,
-            kb_id=kb_id,
-            kbdir_id=kbdir_id,
-            base_url=base_url,
-            api_key=api_key,
-            file_regex=file_regex,
-        )
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP error: {e}")
-        logger.error(f"Response: {e.response.text if e.response else 'No response'}")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Sync failed: {e}")
-        sys.exit(1)
+    sync_directory(
+        directory=directory,
+        kb_id=kb_id,
+        kbdir_id=kbdir_id,
+        base_url=base_url,
+        api_key=api_key,
+        file_regex=file_regex,
+    )
 
 
 @cli.command()
@@ -621,33 +613,25 @@ def sync(base_url, api_key, kb_id, kbdir_id, file_regex, directory):
 )
 def listkb(base_url, api_key):
     """List all knowledge bases."""
-    try:
-        response = make_request(
-            method="GET",
-            endpoint="/api/v1/knowledge/",
-            base_url=base_url,
-            api_key=api_key,
-        )
-        kb_list = response.json()
+    response = make_request(
+        method="GET",
+        endpoint="/api/v1/knowledge/",
+        base_url=base_url,
+        api_key=api_key,
+    )
+    kb_list = response.json()
 
-        # Simplify output to show only essential fields
-        simplified = [
-            {
-                "id": kb.get("id"),
-                "name": kb.get("name"),
-                "description": kb.get("description"),
-            }
-            for kb in kb_list
-        ]
+    # Simplify output to show only essential fields
+    simplified = [
+        {
+            "id": kb.get("id"),
+            "name": kb.get("name"),
+            "description": kb.get("description"),
+        }
+        for kb in kb_list
+    ]
 
-        print(json.dumps(simplified, indent=2))
-
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP error: {e}")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Failed to list knowledge bases: {e}")
-        sys.exit(1)
+    print(json.dumps(simplified, indent=2))
 
 
 @cli.command()
@@ -665,19 +649,11 @@ def listkb(base_url, api_key):
 )
 def listfiles(base_url, api_key):
     """List all uploaded files."""
-    try:
-        response = make_request(
-            method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
-        )
-        files = response.json()
-        print(json.dumps(files, indent=2))
-
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP error: {e}")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Failed to list files: {e}")
-        sys.exit(1)
+    response = make_request(
+        method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
+    )
+    files = response.json()
+    print(json.dumps(files, indent=2))
 
 
 @cli.command()
@@ -698,22 +674,14 @@ def listfiles(base_url, api_key):
 )
 def listkbfiles(base_url, api_key, kb_id):
     """List files in a specific knowledge base."""
-    try:
-        response = make_request(
-            method="GET",
-            endpoint=f"/api/v1/knowledge/{kb_id}",
-            base_url=base_url,
-            api_key=api_key,
-        )
-        kb_data = response.json()
-        print(json.dumps(kb_data, indent=2))
-
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP error: {e}")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Failed to list knowledge base files: {e}")
-        sys.exit(1)
+    response = make_request(
+        method="GET",
+        endpoint=f"/api/v1/knowledge/{kb_id}",
+        base_url=base_url,
+        api_key=api_key,
+    )
+    kb_data = response.json()
+    print(json.dumps(kb_data, indent=2))
 
 
 @cli.command()
@@ -735,25 +703,17 @@ def download(base_url, api_key, file_id):
 
     Example: owui_knowledge_sync.py download abc123 > output.txt
     """
-    try:
-        response = make_request(
-            method="GET",
-            endpoint=f"/api/v1/files/{file_id}/content",
-            base_url=base_url,
-            api_key=api_key,
-            stream=True,
-        )
+    response = make_request(
+        method="GET",
+        endpoint=f"/api/v1/files/{file_id}/content",
+        base_url=base_url,
+        api_key=api_key,
+        stream=True,
+    )
 
-        # Stream content directly to stdout
-        for chunk in response.iter_content(chunk_size=8192):
-            sys.stdout.buffer.write(chunk)
-
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP error: {e}")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Failed to download file: {e}")
-        sys.exit(1)
+    # Stream content directly to stdout
+    for chunk in response.iter_content(chunk_size=8192):
+        sys.stdout.buffer.write(chunk)
 
 
 if __name__ == "__main__":
