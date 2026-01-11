@@ -638,6 +638,8 @@ def listkb(base_url, api_key, debug):
             api_key=api_key,
         )
         kb_list = response.json()
+        if "items" in kb_list and "total" in kb_list:
+            kb_list = kb_list["items"]
 
         # Simplify output to show only essential fields
         simplified = [
