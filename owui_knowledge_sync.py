@@ -536,23 +536,9 @@ def sync_directory(
     )
     kb_data_raw = kb_response.json()
 
-    # Validate knowledge base response
-    kb_validated = validate_response(
-        kb_data_raw, KnowledgeBase, f"knowledge base {kb_id}"
-    )
-    if kb_validated:
-        kb_files = kb_validated.files or []
-    else:
-        # Fallback to raw data if validation fails
-        logger.warning("Using raw knowledge base data due to validation failure")
-        kb_files = kb_data_raw.get("files", [])
-
-    if kb_files is None:
-        kb_files = []
-
-    logger.info(f"Knowledge base contains {len(kb_files)} files")
-
-    # Step 3: Get all files to build hash map and reuse map
+    # Step 3: Get all files to build hash map and reconstruct KB files list
+    # The server sometimes returns empty files list even when files exist,
+    # so we reconstruct it from /api/v1/files/ endpoint
     logger.info("Fetching all uploaded files for hash mapping...")
     all_files_response = make_request(
         method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
@@ -569,6 +555,15 @@ def sync_directory(
             # Keep raw data if validation fails
             logger.warning("Using raw file data due to validation failure")
             all_files.append(file_data)
+
+    # Reconstruct KB files list from all files
+    # Filter files that belong to this knowledge base using collection_name
+    kb_files = [
+        f
+        for f in all_files
+        if f.get("meta", {}).get("collection_name") == kb_id
+    ]
+    logger.info(f"Reconstructed {len(kb_files)} files for knowledge base {kb_id}")
 
     # Build maps for efficient lookup
     # Map decoded filename -> updated_at timestamp for files belonging to our kbdir_id
@@ -1057,6 +1052,7 @@ def list_kb_files(base_url, api_key, kb_id, kb_name, debug):
         # Resolve knowledge base name to ID if needed
         resolved_kb_id = resolve_kb_id(kb_id, kb_name, base_url, api_key)
 
+        # Get knowledge base metadata
         response = make_request(
             method="GET",
             endpoint=f"/api/v1/knowledge/{resolved_kb_id}",
@@ -1064,6 +1060,30 @@ def list_kb_files(base_url, api_key, kb_id, kb_name, debug):
             api_key=api_key,
         )
         kb_data = response.json()
+
+        # Reconstruct files list from /api/v1/files/ endpoint
+        # The server sometimes returns empty files list even when files exist
+        logger.info("Fetching all files to reconstruct knowledge base files list...")
+        all_files_response = make_request(
+            method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
+        )
+        all_files = all_files_response.json()
+
+        # Filter files that belong to this knowledge base
+        # file["meta"]["collection_name"] contains the KB ID (despite the name)
+        kb_files = [
+            f
+            for f in all_files
+            if f.get("meta", {}).get("collection_name") == resolved_kb_id
+        ]
+
+        logger.info(
+            f"Reconstructed {len(kb_files)} files for knowledge base {resolved_kb_id}"
+        )
+
+        # Replace the files field with our reconstructed list
+        kb_data["files"] = kb_files
+
         print(json.dumps(kb_data, indent=2))
     except Exception:
         if debug:
