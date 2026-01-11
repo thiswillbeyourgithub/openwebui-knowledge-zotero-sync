@@ -251,7 +251,7 @@ def upload_file(
     # Some APIs have issues with streaming file handles in multipart uploads
     with open(filepath, "rb") as f:
         file_content = f.read()
-    
+
     files = {"file": (encoded_name, file_content, content_type)}
     response = make_request(
         method="POST",
