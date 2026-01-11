@@ -11,6 +11,7 @@ This tool was developed with assistance from aider.chat.
 
 import hashlib
 import json
+import mimetypes
 import pdb
 import re
 import sys
@@ -239,8 +240,15 @@ def upload_file(
     encoded_name = encode_filename(relative_path, kbdir_id)
     logger.debug(f"Uploading {relative_path} as {encoded_name}")
 
+    # Detect MIME type based on file extension, default to application/octet-stream
+    content_type, _ = mimetypes.guess_type(str(filepath))
+    if content_type is None:
+        content_type = "application/octet-stream"
+    
+    logger.debug(f"Detected content type: {content_type}")
+
     with open(filepath, "rb") as f:
-        files = {"file": (encoded_name, f)}
+        files = {"file": (encoded_name, f, content_type)}
         response = make_request(
             method="POST",
             endpoint="/api/v1/files/",
