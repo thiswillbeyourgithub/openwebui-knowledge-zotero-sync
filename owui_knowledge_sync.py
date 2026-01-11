@@ -1044,7 +1044,9 @@ def prune_files(base_url, api_key, dry, debug):
 
             # Include files where status is not "completed" or content is empty
             # Empty content indicates processing failure even if status is "completed"
-            if (status and status != "completed") or (status == "completed" and not content):
+            if (status and status != "completed") or (
+                status == "completed" and not content
+            ):
                 filename = file_info.get("meta", {}).get(
                     "name", file_info.get("filename", "unknown")
                 )
@@ -1055,7 +1057,9 @@ def prune_files(base_url, api_key, dry, debug):
             logger.info("No files with non-completed status or empty content found")
             return
 
-        logger.info(f"Found {len(to_delete)} files with non-completed status or empty content")
+        logger.info(
+            f"Found {len(to_delete)} files with non-completed status or empty content"
+        )
 
         # Delete or show what would be deleted
         deleted_count = 0
