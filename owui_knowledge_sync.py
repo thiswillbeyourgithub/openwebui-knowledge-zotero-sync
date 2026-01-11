@@ -587,6 +587,7 @@ def sync_directory(
     uploaded_count = 0
     reused_count = 0
     added_count = 0
+    failed_files = []  # Track files that failed to upload or add
 
     for rel_path in local_files:
         local_hash = local_hashes[rel_path]
@@ -637,6 +638,7 @@ def sync_directory(
                         f"Upload failed for {rel_path}: No file ID in response"
                     )
                     logger.error(f"Response: {json.dumps(upload_result, indent=2)}")
+                    failed_files.append((rel_path, "upload failed - no file ID"))
                     continue
 
                 file_id = upload_result["id"]
@@ -666,6 +668,7 @@ def sync_directory(
                 if not add_result.get("id"):
                     logger.error(f"Failed to add {rel_path} to knowledge base")
                     logger.error(f"Response: {json.dumps(add_result, indent=2)}")
+                    failed_files.append((rel_path, "add to KB failed - no KB ID"))
                     continue
 
                 logger.info(f"Added to KB successfully: {rel_path}")
@@ -673,7 +676,17 @@ def sync_directory(
 
             except requests.exceptions.HTTPError as e:
                 logger.error(f"Failed to add {rel_path} to knowledge base: {e}")
+                failed_files.append((rel_path, f"add to KB failed - {e}"))
                 continue
+
+    # Check for failures and raise exception if any occurred
+    if failed_files and not dry:
+        error_summary = "\n".join(
+            f"  - {path}: {reason}" for path, reason in failed_files
+        )
+        raise click.ClickException(
+            f"Sync completed with {len(failed_files)} failures:\n{error_summary}"
+        )
 
     if dry:
         logger.info(
