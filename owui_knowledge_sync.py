@@ -559,9 +559,7 @@ def sync_directory(
     # Reconstruct KB files list from all files
     # Filter files that belong to this knowledge base using collection_name
     kb_files = [
-        f
-        for f in all_files
-        if f.get("meta", {}).get("collection_name") == kb_id
+        f for f in all_files if f.get("meta", {}).get("collection_name") == kb_id
     ]
     logger.info(f"Reconstructed {len(kb_files)} files for knowledge base {kb_id}")
 
