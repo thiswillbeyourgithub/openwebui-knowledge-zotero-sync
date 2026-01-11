@@ -240,10 +240,8 @@ def upload_file(
     encoded_name = encode_filename(relative_path, kbdir_id)
     logger.debug(f"Uploading {relative_path} as {encoded_name}")
 
-    # Detect MIME type based on file extension, default to application/octet-stream
+    # Detect MIME type based on file extension
     content_type, _ = mimetypes.guess_type(str(filepath))
-    if content_type is None:
-        content_type = "application/octet-stream"
 
     logger.debug(f"Detected content type: {content_type}")
 
@@ -252,7 +250,10 @@ def upload_file(
     with open(filepath, "rb") as f:
         file_content = f.read()
 
-    files = {"file": (encoded_name, file_content, content_type)}
+    if content_type is None:
+        files = {"file": (encoded_name, file_content)}
+    else:
+        files = {"file": (encoded_name, file_content, content_type)}
     response = make_request(
         method="POST",
         endpoint="/api/v1/files/",
@@ -572,8 +573,8 @@ def sync_directory(
                 logger.info(f"[DRY RUN] Would delete (content changed): {decoded_name}")
             else:
                 logger.info(f"Deleting (content changed): {decoded_name}")
-            logger.debug(f"  Local hash:  {local_hash}")
-            logger.debug(f"  Remote hash: {remote_hash}")
+            logger.info(f"  Local hash:  {local_hash}")
+            logger.info(f"  Remote hash: {remote_hash}")
             if not dry:
                 remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
             deleted_count += 1
