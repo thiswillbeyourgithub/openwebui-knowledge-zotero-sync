@@ -2,14 +2,13 @@
 """Sync local directory files with OpenWebUI knowledge base.
 
 This script provides a CLI tool to synchronize files from a local directory
-to an OpenWebUI knowledge base. Files are tracked using SHA256 hashes to detect
-changes, and filenames are encoded with a directory identifier to support
-multiple sync directories.
+to an OpenWebUI knowledge base. Files are tracked using modification timestamps
+to detect changes, and filenames are encoded with a directory identifier to
+support multiple sync directories.
 
 This tool was developed with assistance from aider.chat.
 """
 
-import hashlib
 import json
 import mimetypes
 import pdb
@@ -31,25 +30,20 @@ logger.add(sys.stderr, level="INFO", format="<level>{message}</level>")
 logger.add("log.txt", rotation="10 MB", retention="10 days", level="DEBUG")
 
 
-def compute_file_hash(filepath: Path) -> str:
-    """Compute SHA256 hash of a file.
+def get_file_mtime(filepath: Path) -> int:
+    """Get file modification time as Unix timestamp.
 
     Parameters
     ----------
     filepath : Path
-        Path to the file to hash
+        Path to the file
 
     Returns
     -------
-    str
-        Hexadecimal SHA256 hash of the file contents
+    int
+        Unix timestamp (seconds since epoch) of last modification
     """
-    sha256_hash = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        # Read in chunks to handle large files efficiently
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest()
+    return int(filepath.stat().st_mtime)
 
 
 def encode_filename(filepath: str, kbdir_id: str) -> str:
@@ -414,11 +408,11 @@ def sync_directory(
     """Synchronize directory contents with OpenWebUI knowledge base.
 
     Sync logic follows a two-phase approach:
-    1. Delete phase: Remove files from KB that don't exist locally or have changed
+    1. Delete phase: Remove files from KB that don't exist locally or are outdated
     2. Upload phase: Upload and add new or changed files to KB
 
-    Files are reused when possible - if a file with the same encoded name and hash
-    already exists in OpenWebUI, it's added to the KB without re-uploading.
+    Files are compared using modification timestamps - local file mtime is compared
+    with remote file updated_at to determine if re-upload is needed.
 
     Parameters
     ----------
@@ -447,16 +441,16 @@ def sync_directory(
     else:
         logger.info(f"Starting synchronization of {directory}")
 
-    # Step 1: Build local file inventory with hashes
+    # Step 1: Build local file inventory with modification times
     logger.info("Scanning local files...")
     local_files = get_local_files(directory, file_regex)
-    local_hashes: Dict[str, str] = {}
+    local_mtimes: Dict[str, int] = {}
 
     for rel_path in local_files:
         abs_path = directory / rel_path
-        file_hash = compute_file_hash(abs_path)
-        local_hashes[rel_path] = file_hash
-        logger.debug(f"Local file: {rel_path} -> {file_hash}")
+        mtime = get_file_mtime(abs_path)
+        local_mtimes[rel_path] = mtime
+        logger.debug(f"Local file: {rel_path} -> mtime={mtime}")
 
     logger.info(f"Found {len(local_files)} local files")
 
@@ -505,12 +499,10 @@ def sync_directory(
             all_files.append(file_data)
 
     # Build maps for efficient lookup
-    # Map decoded filename -> file hash for files belonging to our kbdir_id
-    file_hash_map: Dict[str, str] = {}
+    # Map decoded filename -> updated_at timestamp for files belonging to our kbdir_id
+    file_updated_at_map: Dict[str, int] = {}
     # Map decoded filename -> file_id for files belonging to our kbdir_id
     file_id_by_name: Dict[str, str] = {}
-    # Map (encoded_name, hash) -> file_id for reuse detection
-    file_by_name_and_hash: Dict[tuple, str] = {}
 
     for file_info in all_files:
         encoded_name = file_info.get("meta", {}).get("name", "")
@@ -518,22 +510,17 @@ def sync_directory(
 
         if decoded_name is not None:
             # This file belongs to our sync directory
-            file_hash = file_info.get("hash")
+            updated_at = file_info.get("updated_at")
             file_id = file_info.get("id")
 
-            if file_hash:
-                file_hash_map[decoded_name] = file_hash
+            if updated_at:
+                file_updated_at_map[decoded_name] = updated_at
             if file_id:
                 file_id_by_name[decoded_name] = file_id
 
             logger.debug(
-                f"Remote file: {decoded_name} -> {file_id} (hash: {file_hash})"
+                f"Remote file: {decoded_name} -> {file_id} (updated_at: {updated_at})"
             )
-
-        # Also track all files by (encoded_name, hash) for reuse
-        if file_info.get("hash") and file_info.get("id"):
-            key = (encoded_name, file_info["hash"])
-            file_by_name_and_hash[key] = file_info["id"]
 
     # Step 4: Delete files from KB that don't match local state
     logger.info("Checking for files to delete from knowledge base...")
@@ -554,8 +541,8 @@ def sync_directory(
             logger.debug(f"Skipping non-directory file: {encoded_name}")
             continue
 
-        local_hash = local_hashes.get(decoded_name)
-        remote_hash = file_hash_map.get(decoded_name)
+        local_mtime = local_mtimes.get(decoded_name)
+        remote_updated_at = file_updated_at_map.get(decoded_name)
 
         if decoded_name not in local_files:
             # File no longer exists locally
@@ -567,20 +554,20 @@ def sync_directory(
                 logger.info(f"Deleting (no longer exists locally): {decoded_name}")
                 remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
             deleted_count += 1
-        elif local_hash != remote_hash:
-            # File exists but content changed
+        elif local_mtime and remote_updated_at and local_mtime > remote_updated_at:
+            # Local file is newer than remote
             if dry:
-                logger.info(f"[DRY RUN] Would delete (content changed): {decoded_name}")
+                logger.info(f"[DRY RUN] Would delete (local file is newer): {decoded_name}")
             else:
-                logger.info(f"Deleting (content changed): {decoded_name}")
-            logger.info(f"  Local hash:  {local_hash}")
-            logger.info(f"  Remote hash: {remote_hash}")
+                logger.info(f"Deleting (local file is newer): {decoded_name}")
+            logger.info(f"  Local mtime:        {local_mtime}")
+            logger.info(f"  Remote updated_at:  {remote_updated_at}")
             if not dry:
                 remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
             deleted_count += 1
         else:
-            # File unchanged
-            logger.debug(f"Keeping (unchanged): {decoded_name}")
+            # File unchanged or remote is newer
+            logger.debug(f"Keeping (up to date): {decoded_name}")
 
     if dry:
         logger.info(f"[DRY RUN] Would delete {deleted_count} files from knowledge base")
@@ -590,76 +577,48 @@ def sync_directory(
     # Step 5: Upload and add new or changed files
     logger.info("Checking for files to add or update...")
     uploaded_count = 0
-    reused_count = 0
     added_count = 0
     failed_files = []  # Track files that failed to upload or add
 
     for rel_path in local_files:
-        local_hash = local_hashes[rel_path]
-        remote_hash = file_hash_map.get(rel_path)
+        local_mtime = local_mtimes[rel_path]
+        remote_updated_at = file_updated_at_map.get(rel_path)
 
-        # Check if file is already in KB with correct content
+        # Check if file is already in KB with current content
         file_in_kb = any(
             decode_filename(f.get("meta", {}).get("name", ""), kbdir_id) == rel_path
             for f in kb_files
         )
 
-        if file_in_kb and local_hash == remote_hash:
-            # File already in KB with correct content
-            logger.debug(f"Skipping (unchanged and in KB): {rel_path}")
+        if file_in_kb and remote_updated_at and local_mtime <= remote_updated_at:
+            # Remote file is up to date or newer than local
+            logger.debug(f"Skipping (up to date in KB): {rel_path}")
             continue
 
-        # File needs to be uploaded or added
-        file_id = None
-        encoded_name = encode_filename(rel_path, kbdir_id)
-        reuse_key = (encoded_name, local_hash)
-
-        # Try to reuse existing file with same name and hash
-        if reuse_key in file_by_name_and_hash:
-            file_id = file_by_name_and_hash[reuse_key]
-            if dry:
-                logger.info(
-                    f"[DRY RUN] Would reuse existing file: {rel_path} ({file_id})"
-                )
-            else:
-                logger.info(f"Reusing existing file: {rel_path} ({file_id})")
-            reused_count += 1
+        # File needs to be uploaded
+        if dry:
+            logger.info(f"[DRY RUN] Would upload: {rel_path}")
+            uploaded_count += 1
+            # In dry run, we can't get a real file_id, so skip the add step
+            continue
         else:
-            # Upload new file
-            if dry:
-                logger.info(f"[DRY RUN] Would upload: {rel_path}")
-                # In dry run, we can't get a real file_id, so skip the add step
-                uploaded_count += 1
-                continue
-            else:
-                logger.info(f"Uploading: {rel_path}")
-                abs_path = directory / rel_path
-                upload_result = upload_file(
-                    abs_path, rel_path, kbdir_id, base_url, api_key
+            logger.info(f"Uploading: {rel_path}")
+            abs_path = directory / rel_path
+            upload_result = upload_file(
+                abs_path, rel_path, kbdir_id, base_url, api_key
+            )
+
+            if not upload_result.get("id"):
+                logger.error(
+                    f"Upload failed for {rel_path}: No file ID in response"
                 )
+                logger.error(f"Response: {json.dumps(upload_result, indent=2)}")
+                failed_files.append((rel_path, "upload failed - no file ID"))
+                continue
 
-                if not upload_result.get("id"):
-                    logger.error(
-                        f"Upload failed for {rel_path}: No file ID in response"
-                    )
-                    logger.error(f"Response: {json.dumps(upload_result, indent=2)}")
-                    failed_files.append((rel_path, "upload failed - no file ID"))
-                    continue
-
-                file_id = upload_result["id"]
-                uploaded_hash = upload_result.get("hash")
-
-                # Verify hash matches (detects upload corruption or encoding issues)
-                if uploaded_hash and uploaded_hash != local_hash:
-                    logger.warning(f"Hash mismatch for {rel_path}:")
-                    logger.warning(f"  Local:    {local_hash}")
-                    logger.warning(f"  Uploaded: {uploaded_hash}")
-                    logger.warning(
-                        "  This may indicate upload corruption or encoding issues"
-                    )
-
-                logger.info(f"Uploaded successfully: {rel_path} ({file_id})")
-                uploaded_count += 1
+            file_id = upload_result["id"]
+            logger.info(f"Uploaded successfully: {rel_path} ({file_id})")
+            uploaded_count += 1
 
         # Add file to knowledge base
         if dry:
@@ -695,12 +654,12 @@ def sync_directory(
 
     if dry:
         logger.info(
-            f"[DRY RUN] Summary: {uploaded_count} would be uploaded, {reused_count} would be reused, {added_count} would be added to KB"
+            f"[DRY RUN] Summary: {uploaded_count} would be uploaded, {added_count} would be added to KB"
         )
         logger.info("[DRY RUN] Synchronization preview completed!")
     else:
         logger.info(
-            f"Upload summary: {uploaded_count} uploaded, {reused_count} reused, {added_count} added to KB"
+            f"Upload summary: {uploaded_count} uploaded, {added_count} added to KB"
         )
         logger.info("Synchronization completed successfully!")
 
