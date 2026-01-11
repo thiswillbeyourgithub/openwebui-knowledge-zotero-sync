@@ -14,6 +14,7 @@ import mimetypes
 import pdb
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -201,12 +202,21 @@ def make_request(
 
 
 def upload_file(
-    filepath: Path, relative_path: str, kbdir_id: str, base_url: str, api_key: str
+    filepath: Path,
+    relative_path: str,
+    kbdir_id: str,
+    base_url: str,
+    api_key: str,
+    timeout: int = 180,
 ) -> Dict:
-    """Upload file to OpenWebUI with encoded filename.
+    """Upload file to OpenWebUI with encoded filename and wait for processing.
 
     The filename is encoded with the kbdir_id prefix to support multiple
     sync directories in the same OpenWebUI instance.
+
+    After upload, this function polls the file status every 5 seconds to wait
+    for OpenWebUI to finish parsing and computing embeddings. Processing is
+    considered complete when the file's data["content"] field is non-empty.
 
     Parameters
     ----------
@@ -220,6 +230,8 @@ def upload_file(
         Base API URL
     api_key : str
         Authentication API key
+    timeout : int
+        Maximum time to wait for processing in seconds (default: 180)
 
     Returns
     -------
@@ -230,6 +242,8 @@ def upload_file(
     ------
     requests.exceptions.HTTPError
         If upload fails
+    click.ClickException
+        If processing fails or times out
     """
     encoded_name = encode_filename(relative_path, kbdir_id)
     logger.debug(f"Uploading {relative_path} as {encoded_name}")
@@ -258,7 +272,63 @@ def upload_file(
     )
 
     out = response.json()
-    return out
+    file_id = out.get("id")
+
+    if not file_id:
+        raise click.ClickException(
+            f"Upload failed for {relative_path}: No file ID in response"
+        )
+
+    # Wait for OpenWebUI to finish processing the file
+    logger.info(f"Waiting for {relative_path} to be processed...")
+    start_time = time.time()
+    poll_interval = 5  # Poll every 5 seconds
+
+    while True:
+        elapsed = time.time() - start_time
+
+        if elapsed > timeout:
+            raise click.ClickException(
+                f"Timeout waiting for {relative_path} to be processed (>{timeout}s)"
+            )
+
+        # Get current file status
+        file_response = make_request(
+            method="GET",
+            endpoint=f"/api/v1/files/{file_id}",
+            base_url=base_url,
+            api_key=api_key,
+        )
+        file_data = file_response.json()
+
+        # Check processing status
+        data = file_data.get("data", {})
+        status = data.get("status")
+        content = data.get("content", "")
+
+        logger.debug(
+            f"File {relative_path} status: {status}, content length: {len(content)}"
+        )
+
+        # Check if processing failed
+        if status == "failed":
+            error_msg = data.get("error", "Unknown error")
+            raise click.ClickException(
+                f"Processing failed for {relative_path}: {error_msg}"
+            )
+
+        # Check if processing is complete (content is non-empty)
+        if content:
+            logger.info(
+                f"File {relative_path} processed successfully in {elapsed:.1f}s"
+            )
+            return out
+
+        # Wait before next poll
+        logger.debug(
+            f"File {relative_path} still processing... ({elapsed:.1f}s elapsed)"
+        )
+        time.sleep(poll_interval)
 
 
 def add_file_to_kb(file_id: str, kb_id: str, base_url: str, api_key: str) -> Dict:
@@ -608,7 +678,9 @@ def sync_directory(
         else:
             logger.info(f"Uploading: {rel_path}")
             abs_path = directory / rel_path
-            upload_result = upload_file(abs_path, rel_path, kbdir_id, base_url, api_key)
+            upload_result = upload_file(
+                abs_path, rel_path, kbdir_id, base_url, api_key, timeout=180
+            )
 
             if not upload_result.get("id"):
                 logger.error(f"Upload failed for {rel_path}: No file ID in response")
