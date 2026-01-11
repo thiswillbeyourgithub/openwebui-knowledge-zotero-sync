@@ -239,15 +239,16 @@ def upload_file(
 
     logger.debug(f"Detected content type: {content_type}")
 
-    # Read file content into memory to ensure it's fully available for upload
-    # Some APIs have issues with streaming file handles in multipart uploads
-    with open(filepath, "rb") as f:
-        file_content = f.read()
-
-    if content_type is None:
-        files = {"file": (encoded_name, file_content)}
+    if content_type == "text/plain":
+        file = open(filepath, "r")
     else:
-        files = {"file": (encoded_name, file_content, content_type)}
+        file = open(filepath, "rb")
+
+    # files = {"file": file}
+    if not content_type:
+        files = {"file": (encoded_name, file)}
+    else:
+        files = {"file": (encoded_name, file, content_type)}
     response = make_request(
         method="POST",
         endpoint="/api/v1/files/",
@@ -256,7 +257,8 @@ def upload_file(
         files=files,
     )
 
-    return response.json()
+    out = response.json()
+    return out
 
 
 def add_file_to_kb(file_id: str, kb_id: str, base_url: str, api_key: str) -> Dict:
