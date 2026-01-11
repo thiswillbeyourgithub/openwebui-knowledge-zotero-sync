@@ -247,15 +247,19 @@ def upload_file(
 
     logger.debug(f"Detected content type: {content_type}")
 
+    # Read file content into memory to ensure it's fully available for upload
+    # Some APIs have issues with streaming file handles in multipart uploads
     with open(filepath, "rb") as f:
-        files = {"file": (encoded_name, f, content_type)}
-        response = make_request(
-            method="POST",
-            endpoint="/api/v1/files/",
-            base_url=base_url,
-            api_key=api_key,
-            files=files,
-        )
+        file_content = f.read()
+    
+    files = {"file": (encoded_name, file_content, content_type)}
+    response = make_request(
+        method="POST",
+        endpoint="/api/v1/files/",
+        base_url=base_url,
+        api_key=api_key,
+        files=files,
+    )
 
     return response.json()
 
