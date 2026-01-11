@@ -881,6 +881,97 @@ def list_kb_files(base_url, api_key, kb_id, debug):
     help="OpenWebUI API authentication key",
 )
 @click.option(
+    "--dry",
+    is_flag=True,
+    help="Dry run - show what would be deleted without actually deleting",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable debug mode - drop into pdb debugger on exceptions",
+)
+def prune_files(base_url, api_key, dry, debug):
+    """Delete files with non-completed status from OpenWebUI.
+
+    This command identifies and deletes files whose processing status is not
+    "completed". Use --dry to preview what would be deleted without actually
+    performing the deletion.
+    """
+    try:
+        response = make_request(
+            method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
+        )
+        files = response.json()
+
+        # Find files with non-completed status
+        to_delete = []
+        for file_info in files:
+            data = file_info.get("data", {})
+            status = data.get("status")
+
+            # Only include files where status is not "completed"
+            if status and status != "completed":
+                filename = file_info.get("meta", {}).get(
+                    "name", file_info.get("filename", "unknown")
+                )
+                file_id = file_info.get("id")
+                to_delete.append((file_id, filename, status))
+
+        if not to_delete:
+            logger.info("No files with non-completed status found")
+            return
+
+        logger.info(f"Found {len(to_delete)} files with non-completed status")
+
+        # Delete or show what would be deleted
+        deleted_count = 0
+        for file_id, filename, status in to_delete:
+            if dry:
+                logger.info(
+                    f"[DRY RUN] Would delete: {filename} (status: {status}, id: {file_id})"
+                )
+            else:
+                logger.info(f"Deleting: {filename} (status: {status}, id: {file_id})")
+                try:
+                    make_request(
+                        method="DELETE",
+                        endpoint=f"/api/v1/files/{file_id}",
+                        base_url=base_url,
+                        api_key=api_key,
+                    )
+                    deleted_count += 1
+                    logger.info(f"Deleted: {filename}")
+                except requests.exceptions.HTTPError as e:
+                    logger.error(f"Failed to delete {filename}: {e}")
+
+        if dry:
+            logger.info(f"[DRY RUN] Would delete {len(to_delete)} files")
+        else:
+            logger.info(
+                f"Successfully deleted {deleted_count} of {len(to_delete)} files"
+            )
+
+    except Exception:
+        if debug:
+            logger.error("Exception occurred, entering debugger...")
+            pdb.post_mortem()
+        raise
+
+
+@cli.command()
+@click.option(
+    "--base-url",
+    envvar="OPENWEBUI_BASE_URL",
+    default="http://localhost:3000",
+    help="OpenWebUI API base URL",
+)
+@click.option(
+    "--api-key",
+    envvar="OPENWEBUI_API_KEY",
+    required=True,
+    help="OpenWebUI API authentication key",
+)
+@click.option(
     "--debug",
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
