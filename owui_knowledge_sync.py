@@ -549,7 +549,7 @@ def cli():
 @cli.command()
 @click.option(
     "--api-url",
-    envvar="OPENWEBUI_API_URL",
+    envvar="OPENWEBUI_API_BASE_URL",
     default="http://localhost:3000",
     help="OpenWebUI API base URL",
 )
