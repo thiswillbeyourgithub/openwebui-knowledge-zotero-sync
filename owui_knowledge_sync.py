@@ -673,17 +673,32 @@ def listkb(base_url, api_key, debug):
     help="OpenWebUI API authentication key",
 )
 @click.option(
+    "--nodata",
+    is_flag=True,
+    help="Redact file data content in output",
+)
+@click.option(
     "--debug",
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
 )
-def listfiles(base_url, api_key, debug):
+def listfiles(base_url, api_key, nodata, debug):
     """List all uploaded files."""
     try:
         response = make_request(
             method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
         )
         files = response.json()
+
+        # Redact data field if requested
+        if nodata:
+            for file_info in files:
+                if "data" in file_info:
+                    if "content" in file_info["data"]:
+                        file_info["data"]["content"] = "redacted"
+                    else:
+                        file_info["data"] = "redacted"
+
         print(json.dumps(files, indent=2))
     except Exception:
         if debug:
