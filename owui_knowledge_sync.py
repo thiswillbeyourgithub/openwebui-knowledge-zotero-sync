@@ -21,6 +21,8 @@ import click
 import requests
 from loguru import logger
 
+from utils.datatypes import File, KnowledgeBase, validate_response
+
 # Configure logger to write to both console and file
 # Detailed logs go to file, INFO+ goes to console
 logger.remove()  # Remove default handler
@@ -380,8 +382,17 @@ def sync_directory(
         base_url=base_url,
         api_key=api_key,
     )
-    kb_data = kb_response.json()
-    kb_files = kb_data.get("files", [])
+    kb_data_raw = kb_response.json()
+    
+    # Validate knowledge base response
+    kb_validated = validate_response(kb_data_raw, KnowledgeBase, f"knowledge base {kb_id}")
+    if kb_validated:
+        kb_files = kb_validated.files or []
+    else:
+        # Fallback to raw data if validation fails
+        logger.warning("Using raw knowledge base data due to validation failure")
+        kb_files = kb_data_raw.get("files", [])
+    
     logger.info(f"Knowledge base contains {len(kb_files)} files")
 
     # Step 3: Get all files to build hash map and reuse map
@@ -389,7 +400,18 @@ def sync_directory(
     all_files_response = make_request(
         method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
     )
-    all_files = all_files_response.json()
+    all_files_raw = all_files_response.json()
+    
+    # Validate each file in the response
+    all_files = []
+    for file_data in all_files_raw:
+        file_validated = validate_response(file_data, File, "file in all files list")
+        if file_validated:
+            all_files.append(file_validated.model_dump())
+        else:
+            # Keep raw data if validation fails
+            logger.warning("Using raw file data due to validation failure")
+            all_files.append(file_data)
 
     # Build maps for efficient lookup
     # Map decoded filename -> file hash for files belonging to our kbdir_id
@@ -426,7 +448,13 @@ def sync_directory(
     logger.info("Checking for files to delete from knowledge base...")
     deleted_count = 0
 
-    for kb_file in kb_files:
+    for kb_file_data in kb_files:
+        # Handle both validated File objects and raw dicts
+        if isinstance(kb_file_data, File):
+            kb_file = kb_file_data.model_dump()
+        else:
+            kb_file = kb_file_data
+        
         encoded_name = kb_file.get("meta", {}).get("name", "")
         decoded_name = decode_filename(encoded_name, kbdir_id)
 
