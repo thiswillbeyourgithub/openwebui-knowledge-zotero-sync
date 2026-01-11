@@ -93,13 +93,10 @@ def decode_filename(encoded_name: str, kbdir_id: str) -> Optional[str]:
     if not encoded_name.startswith(prefix):
         return None
     # Remove prefix and convert %% back to /
-    return encoded_name[len(prefix):].replace("%%", "/")
+    return encoded_name[len(prefix) :].replace("%%", "/")
 
 
-def get_local_files(
-    directory: Path,
-    file_regex: Optional[str] = None
-) -> List[str]:
+def get_local_files(directory: Path, file_regex: Optional[str] = None) -> List[str]:
     """Recursively find files in directory matching optional regex pattern.
 
     Excludes hidden files (starting with .) and the log file.
@@ -152,7 +149,7 @@ def make_request(
     api_key: str,
     json_data: Optional[Dict] = None,
     files: Optional[Dict] = None,
-    stream: bool = False
+    stream: bool = False,
 ) -> requests.Response:
     """Make HTTP request to OpenWebUI API with proper authentication.
 
@@ -184,10 +181,7 @@ def make_request(
         If the request fails with a non-2xx status code
     """
     url = f"{api_url.rstrip('/')}{endpoint}"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
 
     logger.debug(f"{method} {url}")
     if json_data:
@@ -199,7 +193,7 @@ def make_request(
         headers=headers,
         json=json_data,
         files=files,
-        stream=stream
+        stream=stream,
     )
 
     logger.debug(f"Response status: {response.status_code}")
@@ -209,11 +203,7 @@ def make_request(
 
 
 def upload_file(
-    filepath: Path,
-    relative_path: str,
-    kbdir_id: str,
-    api_url: str,
-    api_key: str
+    filepath: Path, relative_path: str, kbdir_id: str, api_url: str, api_key: str
 ) -> Dict:
     """Upload file to OpenWebUI with encoded filename.
 
@@ -253,18 +243,13 @@ def upload_file(
             endpoint="/api/v1/files/",
             api_url=api_url,
             api_key=api_key,
-            files=files
+            files=files,
         )
 
     return response.json()
 
 
-def add_file_to_kb(
-    file_id: str,
-    kb_id: str,
-    api_url: str,
-    api_key: str
-) -> Dict:
+def add_file_to_kb(file_id: str, kb_id: str, api_url: str, api_key: str) -> Dict:
     """Add an uploaded file to a knowledge base.
 
     Parameters
@@ -293,17 +278,12 @@ def add_file_to_kb(
         endpoint=f"/api/v1/knowledge/{kb_id}/file/add",
         api_url=api_url,
         api_key=api_key,
-        json_data={"file_id": file_id}
+        json_data={"file_id": file_id},
     )
     return response.json()
 
 
-def remove_file_from_kb(
-    file_id: str,
-    kb_id: str,
-    api_url: str,
-    api_key: str
-) -> Dict:
+def remove_file_from_kb(file_id: str, kb_id: str, api_url: str, api_key: str) -> Dict:
     """Remove a file from a knowledge base.
 
     This also deletes the file from storage automatically per OpenWebUI behavior.
@@ -334,7 +314,7 @@ def remove_file_from_kb(
         endpoint=f"/api/v1/knowledge/{kb_id}/file/remove",
         api_url=api_url,
         api_key=api_key,
-        json_data={"file_id": file_id}
+        json_data={"file_id": file_id},
     )
     return response.json()
 
@@ -345,7 +325,7 @@ def sync_directory(
     kbdir_id: str,
     api_url: str,
     api_key: str,
-    file_regex: Optional[str] = None
+    file_regex: Optional[str] = None,
 ) -> None:
     """Synchronize directory contents with OpenWebUI knowledge base.
 
@@ -397,7 +377,7 @@ def sync_directory(
         method="GET",
         endpoint=f"/api/v1/knowledge/{kb_id}",
         api_url=api_url,
-        api_key=api_key
+        api_key=api_key,
     )
     kb_data = kb_response.json()
     kb_files = kb_data.get("files", [])
@@ -406,10 +386,7 @@ def sync_directory(
     # Step 3: Get all files to build hash map and reuse map
     logger.info("Fetching all uploaded files for hash mapping...")
     all_files_response = make_request(
-        method="GET",
-        endpoint="/api/v1/files/",
-        api_url=api_url,
-        api_key=api_key
+        method="GET", endpoint="/api/v1/files/", api_url=api_url, api_key=api_key
     )
     all_files = all_files_response.json()
 
@@ -435,7 +412,9 @@ def sync_directory(
             if file_id:
                 file_id_by_name[decoded_name] = file_id
 
-            logger.debug(f"Remote file: {decoded_name} -> {file_id} (hash: {file_hash})")
+            logger.debug(
+                f"Remote file: {decoded_name} -> {file_id} (hash: {file_hash})"
+            )
 
         # Also track all files by (encoded_name, hash) for reuse
         if file_info.get("hash") and file_info.get("id"):
@@ -526,7 +505,9 @@ def sync_directory(
                 logger.warning(f"Hash mismatch for {rel_path}:")
                 logger.warning(f"  Local:    {local_hash}")
                 logger.warning(f"  Uploaded: {uploaded_hash}")
-                logger.warning("  This may indicate upload corruption or encoding issues")
+                logger.warning(
+                    "  This may indicate upload corruption or encoding issues"
+                )
 
             logger.info(f"Uploaded successfully: {rel_path} ({file_id})")
             uploaded_count += 1
@@ -548,7 +529,9 @@ def sync_directory(
             logger.error(f"Failed to add {rel_path} to knowledge base: {e}")
             continue
 
-    logger.info(f"Upload summary: {uploaded_count} uploaded, {reused_count} reused, {added_count} added to KB")
+    logger.info(
+        f"Upload summary: {uploaded_count} uploaded, {reused_count} reused, {added_count} added to KB"
+    )
     logger.info("Synchronization completed successfully!")
 
 
@@ -568,35 +551,35 @@ def cli():
     "--api-url",
     envvar="OPENWEBUI_API_URL",
     default="http://localhost:3000",
-    help="OpenWebUI API base URL"
+    help="OpenWebUI API base URL",
 )
 @click.option(
     "--api-key",
     envvar="OPENWEBUI_API_KEY",
     required=True,
-    help="OpenWebUI API authentication key"
+    help="OpenWebUI API authentication key",
 )
 @click.option(
     "--kb-id",
     envvar="OPENWEBUI_KB_ID",
     required=True,
-    help="Knowledge base ID to sync with"
+    help="Knowledge base ID to sync with",
 )
 @click.option(
     "--kbdir-id",
     envvar="OPENWEBUI_KBDIR_ID",
     required=True,
-    help="Unique identifier for this sync directory (used in filename encoding)"
+    help="Unique identifier for this sync directory (used in filename encoding)",
 )
 @click.option(
     "--file-regex",
     envvar="OPENWEBUI_FILE_REGEX",
-    help="Regular expression to filter files (e.g., '.*\\.md$' for markdown only)"
+    help="Regular expression to filter files (e.g., '.*\\.md$' for markdown only)",
 )
 @click.argument(
     "directory",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    default="."
+    default=".",
 )
 def sync(api_url, api_key, kb_id, kbdir_id, file_regex, directory):
     """Synchronize DIRECTORY with OpenWebUI knowledge base.
@@ -612,7 +595,7 @@ def sync(api_url, api_key, kb_id, kbdir_id, file_regex, directory):
             kbdir_id=kbdir_id,
             api_url=api_url,
             api_key=api_key,
-            file_regex=file_regex
+            file_regex=file_regex,
         )
     except requests.exceptions.HTTPError as e:
         logger.error(f"HTTP error: {e}")
@@ -628,13 +611,13 @@ def sync(api_url, api_key, kb_id, kbdir_id, file_regex, directory):
     "--api-url",
     envvar="OPENWEBUI_API_URL",
     default="http://localhost:3000",
-    help="OpenWebUI API base URL"
+    help="OpenWebUI API base URL",
 )
 @click.option(
     "--api-key",
     envvar="OPENWEBUI_API_KEY",
     required=True,
-    help="OpenWebUI API authentication key"
+    help="OpenWebUI API authentication key",
 )
 def listkb(api_url, api_key):
     """List all knowledge bases."""
@@ -643,7 +626,7 @@ def listkb(api_url, api_key):
             method="GET",
             endpoint="/api/v1/knowledge/",
             api_url=api_url,
-            api_key=api_key
+            api_key=api_key,
         )
         kb_list = response.json()
 
@@ -652,7 +635,7 @@ def listkb(api_url, api_key):
             {
                 "id": kb.get("id"),
                 "name": kb.get("name"),
-                "description": kb.get("description")
+                "description": kb.get("description"),
             }
             for kb in kb_list
         ]
@@ -672,22 +655,19 @@ def listkb(api_url, api_key):
     "--api-url",
     envvar="OPENWEBUI_API_URL",
     default="http://localhost:3000",
-    help="OpenWebUI API base URL"
+    help="OpenWebUI API base URL",
 )
 @click.option(
     "--api-key",
     envvar="OPENWEBUI_API_KEY",
     required=True,
-    help="OpenWebUI API authentication key"
+    help="OpenWebUI API authentication key",
 )
 def listfiles(api_url, api_key):
     """List all uploaded files."""
     try:
         response = make_request(
-            method="GET",
-            endpoint="/api/v1/files/",
-            api_url=api_url,
-            api_key=api_key
+            method="GET", endpoint="/api/v1/files/", api_url=api_url, api_key=api_key
         )
         files = response.json()
         print(json.dumps(files, indent=2))
@@ -705,19 +685,16 @@ def listfiles(api_url, api_key):
     "--api-url",
     envvar="OPENWEBUI_API_URL",
     default="http://localhost:3000",
-    help="OpenWebUI API base URL"
+    help="OpenWebUI API base URL",
 )
 @click.option(
     "--api-key",
     envvar="OPENWEBUI_API_KEY",
     required=True,
-    help="OpenWebUI API authentication key"
+    help="OpenWebUI API authentication key",
 )
 @click.option(
-    "--kb-id",
-    envvar="OPENWEBUI_KB_ID",
-    required=True,
-    help="Knowledge base ID"
+    "--kb-id", envvar="OPENWEBUI_KB_ID", required=True, help="Knowledge base ID"
 )
 def listkbfiles(api_url, api_key, kb_id):
     """List files in a specific knowledge base."""
@@ -726,7 +703,7 @@ def listkbfiles(api_url, api_key, kb_id):
             method="GET",
             endpoint=f"/api/v1/knowledge/{kb_id}",
             api_url=api_url,
-            api_key=api_key
+            api_key=api_key,
         )
         kb_data = response.json()
         print(json.dumps(kb_data, indent=2))
@@ -744,13 +721,13 @@ def listkbfiles(api_url, api_key, kb_id):
     "--api-url",
     envvar="OPENWEBUI_API_URL",
     default="http://localhost:3000",
-    help="OpenWebUI API base URL"
+    help="OpenWebUI API base URL",
 )
 @click.option(
     "--api-key",
     envvar="OPENWEBUI_API_KEY",
     required=True,
-    help="OpenWebUI API authentication key"
+    help="OpenWebUI API authentication key",
 )
 @click.argument("file_id")
 def download(api_url, api_key, file_id):
@@ -764,7 +741,7 @@ def download(api_url, api_key, file_id):
             endpoint=f"/api/v1/files/{file_id}/content",
             api_url=api_url,
             api_key=api_key,
-            stream=True
+            stream=True,
         )
 
         # Stream content directly to stdout
