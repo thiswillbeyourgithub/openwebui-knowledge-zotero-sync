@@ -923,7 +923,9 @@ def files_status(base_url, api_key, debug):
 
             # Include files where status is not "completed" or content is empty
             # Empty content indicates processing failure even if status is "completed"
-            if (status and status != "completed") or (status == "completed" and not content):
+            if (status and status != "completed") or (
+                status == "completed" and not content
+            ):
                 filename = file_info.get("meta", {}).get(
                     "name", file_info.get("filename", "unknown")
                 )
