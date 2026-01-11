@@ -767,9 +767,30 @@ def files_status(base_url, api_key, debug):
     """List files with non-completed status.
 
     Returns a dict with filename as key and data (excluding content) as value
-    for all files where status is not "completed".
+    for all files where status is not "completed". Includes collection name
+    if the file is in a knowledge base.
     """
     try:
+        # Fetch all knowledge bases to map file IDs to collection names
+        kb_response = make_request(
+            method="GET",
+            endpoint="/api/v1/knowledge/",
+            base_url=base_url,
+            api_key=api_key,
+        )
+        kb_list = kb_response.json()
+        if "items" in kb_list and "total" in kb_list:
+            kb_list = kb_list["items"]
+
+        # Build map of file_id -> collection_name
+        file_to_collection = {}
+        for kb in kb_list:
+            kb_name = kb.get("name", "unknown")
+            for file_info in kb.get("files", []):
+                file_id = file_info.get("id")
+                if file_id:
+                    file_to_collection[file_id] = kb_name
+
         response = make_request(
             method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
         )
@@ -791,6 +812,11 @@ def files_status(base_url, api_key, debug):
                 data_copy = data.copy()
                 if "content" in data_copy:
                     del data_copy["content"]
+
+                # Add collection name if file is in a collection
+                file_id = file_info.get("id")
+                if file_id and file_id in file_to_collection:
+                    data_copy["collection"] = file_to_collection[file_id]
 
                 output[filename] = data_copy
 
