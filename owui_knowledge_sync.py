@@ -773,7 +773,8 @@ def sync(
         )
     except Exception:
         if debug:
-            logger.error("Exception occurred, entering debugger...")
+            logger.exception("Exception occurred during sync:")
+            logger.error("Entering debugger...")
             pdb.post_mortem()
         raise
 
