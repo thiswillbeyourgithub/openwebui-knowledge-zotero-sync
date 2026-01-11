@@ -21,6 +21,7 @@ from typing import Dict, List, Optional, Set
 import click
 import requests
 from loguru import logger
+from tqdm import tqdm
 
 from utils.datatypes import File, KnowledgeBase, validate_response
 
@@ -595,7 +596,7 @@ def sync_directory(
     deleted_count = 0
     failed_files = []  # Track files that failed to delete, upload, or add
 
-    for kb_file_data in kb_files:
+    for kb_file_data in tqdm(kb_files, desc="Checking files for deletion", disable=dry):
         # Handle both validated File objects and raw dicts
         if isinstance(kb_file_data, File):
             kb_file = kb_file_data.model_dump()
@@ -664,7 +665,7 @@ def sync_directory(
     uploaded_count = 0
     added_count = 0
 
-    for rel_path in local_files:
+    for rel_path in tqdm(local_files, desc="Uploading and adding files", disable=dry):
         local_mtime = local_mtimes[rel_path]
         remote_updated_at = file_updated_at_map.get(rel_path)
 
