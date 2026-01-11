@@ -87,12 +87,16 @@ class FileMeta(BaseModel):
         File size in bytes
     data : Optional[Dict[str, Any]]
         Additional metadata (e.g., knowledge_id)
+    collection_name : Optional[str]
+        Name of the collection if present. WARNING this is actually the
+        id of the collection, not its name.
     """
 
     name: str
     content_type: Optional[str] = None
     size: int
     data: Optional[Dict[str, Any]] = None
+    collection_name: Optional[str] = None
 
 
 class File(BaseModel):
