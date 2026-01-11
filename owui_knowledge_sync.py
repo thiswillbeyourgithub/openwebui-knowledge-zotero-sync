@@ -914,14 +914,16 @@ def files_status(base_url, api_key, debug):
         )
         files = response.json()
 
-        # Build output dict for files with non-completed status
+        # Build output dict for files with non-completed status or empty content
         output = {}
         for file_info in files:
             data = file_info.get("data", {})
             status = data.get("status")
+            content = data.get("content", "")
 
-            # Only include files where status is not "completed"
-            if status and status != "completed":
+            # Include files where status is not "completed" or content is empty
+            # Empty content indicates processing failure even if status is "completed"
+            if (status and status != "completed") or (status == "completed" and not content):
                 filename = file_info.get("meta", {}).get(
                     "name", file_info.get("filename", "unknown")
                 )
