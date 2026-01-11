@@ -694,7 +694,9 @@ def sync_directory(
                 )
 
                 if not upload_result.get("id"):
-                    logger.error(f"Upload failed for {rel_path}: No file ID in response")
+                    logger.error(
+                        f"Upload failed for {rel_path}: No file ID in response"
+                    )
                     logger.error(f"Response: {json.dumps(upload_result, indent=2)}")
                     failed_files.append((rel_path, "upload failed - no file ID"))
                     continue
