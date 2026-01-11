@@ -468,6 +468,9 @@ def sync_directory(
         logger.warning("Using raw knowledge base data due to validation failure")
         kb_files = kb_data_raw.get("files", [])
 
+    if kb_files is None:
+        kb_files = []
+
     logger.info(f"Knowledge base contains {len(kb_files)} files")
 
     # Step 3: Get all files to build hash map and reuse map
