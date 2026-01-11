@@ -477,7 +477,9 @@ def sync_directory(
         if decoded_name not in local_files:
             # File no longer exists locally
             if dry:
-                logger.info(f"[DRY RUN] Would delete (no longer exists locally): {decoded_name}")
+                logger.info(
+                    f"[DRY RUN] Would delete (no longer exists locally): {decoded_name}"
+                )
             else:
                 logger.info(f"Deleting (no longer exists locally): {decoded_name}")
                 remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
@@ -532,7 +534,9 @@ def sync_directory(
         if reuse_key in file_by_name_and_hash:
             file_id = file_by_name_and_hash[reuse_key]
             if dry:
-                logger.info(f"[DRY RUN] Would reuse existing file: {rel_path} ({file_id})")
+                logger.info(
+                    f"[DRY RUN] Would reuse existing file: {rel_path} ({file_id})"
+                )
             else:
                 logger.info(f"Reusing existing file: {rel_path} ({file_id})")
             reused_count += 1
@@ -546,10 +550,14 @@ def sync_directory(
             else:
                 logger.info(f"Uploading: {rel_path}")
                 abs_path = directory / rel_path
-                upload_result = upload_file(abs_path, rel_path, kbdir_id, base_url, api_key)
+                upload_result = upload_file(
+                    abs_path, rel_path, kbdir_id, base_url, api_key
+                )
 
                 if not upload_result.get("id"):
-                    logger.error(f"Upload failed for {rel_path}: No file ID in response")
+                    logger.error(
+                        f"Upload failed for {rel_path}: No file ID in response"
+                    )
                     logger.error(f"Response: {json.dumps(upload_result, indent=2)}")
                     continue
 
