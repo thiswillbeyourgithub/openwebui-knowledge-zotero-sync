@@ -1022,11 +1022,12 @@ def list_kb_files(base_url, api_key, kb_id, kb_name, debug):
     help="Enable debug mode - drop into pdb debugger on exceptions",
 )
 def prune_files(base_url, api_key, dry, debug):
-    """Delete files with non-completed status from OpenWebUI.
+    """Delete files with non-completed status or empty content from OpenWebUI.
 
     This command identifies and deletes files whose processing status is not
-    "completed". Use --dry to preview what would be deleted without actually
-    performing the deletion.
+    "completed" or have empty content (indicating processing failure).
+    Use --dry to preview what would be deleted without actually performing
+    the deletion.
     """
     try:
         response = make_request(
@@ -1034,14 +1035,16 @@ def prune_files(base_url, api_key, dry, debug):
         )
         files = response.json()
 
-        # Find files with non-completed status
+        # Find files with non-completed status or empty content
         to_delete = []
         for file_info in files:
             data = file_info.get("data", {})
             status = data.get("status")
+            content = data.get("content", "")
 
-            # Only include files where status is not "completed"
-            if status and status != "completed":
+            # Include files where status is not "completed" or content is empty
+            # Empty content indicates processing failure even if status is "completed"
+            if (status and status != "completed") or (status == "completed" and not content):
                 filename = file_info.get("meta", {}).get(
                     "name", file_info.get("filename", "unknown")
                 )
@@ -1049,10 +1052,10 @@ def prune_files(base_url, api_key, dry, debug):
                 to_delete.append((file_id, filename, status))
 
         if not to_delete:
-            logger.info("No files with non-completed status found")
+            logger.info("No files with non-completed status or empty content found")
             return
 
-        logger.info(f"Found {len(to_delete)} files with non-completed status")
+        logger.info(f"Found {len(to_delete)} files with non-completed status or empty content")
 
         # Delete or show what would be deleted
         deleted_count = 0
