@@ -133,3 +133,4 @@ hpsx*
 
 .aider*
 log.txt
+**/__pycache__
