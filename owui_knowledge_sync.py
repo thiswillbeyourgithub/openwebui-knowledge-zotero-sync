@@ -11,6 +11,7 @@ This tool was developed with assistance from aider.chat.
 
 import hashlib
 import json
+import pdb
 import re
 import sys
 from pathlib import Path
@@ -576,26 +577,37 @@ def cli():
     envvar="OPENWEBUI_FILE_REGEX",
     help="Regular expression to filter files (e.g., '.*\\.md$' for markdown only)",
 )
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable debug mode - drop into pdb debugger on exceptions",
+)
 @click.argument(
     "directory",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default=".",
 )
-def sync(base_url, api_key, kb_id, kbdir_id, file_regex, directory):
+def sync(base_url, api_key, kb_id, kbdir_id, file_regex, debug, directory):
     """Synchronize DIRECTORY with OpenWebUI knowledge base.
 
     All files in the knowledge base belonging to this kbdir-id that don't exist
     locally or have different content will be deleted. All local files will be
     uploaded or updated as needed.
     """
-    sync_directory(
-        directory=directory,
-        kb_id=kb_id,
-        kbdir_id=kbdir_id,
-        base_url=base_url,
-        api_key=api_key,
-        file_regex=file_regex,
-    )
+    try:
+        sync_directory(
+            directory=directory,
+            kb_id=kb_id,
+            kbdir_id=kbdir_id,
+            base_url=base_url,
+            api_key=api_key,
+            file_regex=file_regex,
+        )
+    except Exception:
+        if debug:
+            logger.error("Exception occurred, entering debugger...")
+            pdb.post_mortem()
+        raise
 
 
 @cli.command()
@@ -611,27 +623,38 @@ def sync(base_url, api_key, kb_id, kbdir_id, file_regex, directory):
     required=True,
     help="OpenWebUI API authentication key",
 )
-def listkb(base_url, api_key):
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable debug mode - drop into pdb debugger on exceptions",
+)
+def listkb(base_url, api_key, debug):
     """List all knowledge bases."""
-    response = make_request(
-        method="GET",
-        endpoint="/api/v1/knowledge/",
-        base_url=base_url,
-        api_key=api_key,
-    )
-    kb_list = response.json()
+    try:
+        response = make_request(
+            method="GET",
+            endpoint="/api/v1/knowledge/",
+            base_url=base_url,
+            api_key=api_key,
+        )
+        kb_list = response.json()
 
-    # Simplify output to show only essential fields
-    simplified = [
-        {
-            "id": kb.get("id"),
-            "name": kb.get("name"),
-            "description": kb.get("description"),
-        }
-        for kb in kb_list
-    ]
+        # Simplify output to show only essential fields
+        simplified = [
+            {
+                "id": kb.get("id"),
+                "name": kb.get("name"),
+                "description": kb.get("description"),
+            }
+            for kb in kb_list
+        ]
 
-    print(json.dumps(simplified, indent=2))
+        print(json.dumps(simplified, indent=2))
+    except Exception:
+        if debug:
+            logger.error("Exception occurred, entering debugger...")
+            pdb.post_mortem()
+        raise
 
 
 @cli.command()
@@ -647,13 +670,24 @@ def listkb(base_url, api_key):
     required=True,
     help="OpenWebUI API authentication key",
 )
-def listfiles(base_url, api_key):
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable debug mode - drop into pdb debugger on exceptions",
+)
+def listfiles(base_url, api_key, debug):
     """List all uploaded files."""
-    response = make_request(
-        method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
-    )
-    files = response.json()
-    print(json.dumps(files, indent=2))
+    try:
+        response = make_request(
+            method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
+        )
+        files = response.json()
+        print(json.dumps(files, indent=2))
+    except Exception:
+        if debug:
+            logger.error("Exception occurred, entering debugger...")
+            pdb.post_mortem()
+        raise
 
 
 @cli.command()
@@ -672,16 +706,27 @@ def listfiles(base_url, api_key):
 @click.option(
     "--kb-id", envvar="OPENWEBUI_KB_ID", required=True, help="Knowledge base ID"
 )
-def listkbfiles(base_url, api_key, kb_id):
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable debug mode - drop into pdb debugger on exceptions",
+)
+def listkbfiles(base_url, api_key, kb_id, debug):
     """List files in a specific knowledge base."""
-    response = make_request(
-        method="GET",
-        endpoint=f"/api/v1/knowledge/{kb_id}",
-        base_url=base_url,
-        api_key=api_key,
-    )
-    kb_data = response.json()
-    print(json.dumps(kb_data, indent=2))
+    try:
+        response = make_request(
+            method="GET",
+            endpoint=f"/api/v1/knowledge/{kb_id}",
+            base_url=base_url,
+            api_key=api_key,
+        )
+        kb_data = response.json()
+        print(json.dumps(kb_data, indent=2))
+    except Exception:
+        if debug:
+            logger.error("Exception occurred, entering debugger...")
+            pdb.post_mortem()
+        raise
 
 
 @cli.command()
@@ -697,23 +742,34 @@ def listkbfiles(base_url, api_key, kb_id):
     required=True,
     help="OpenWebUI API authentication key",
 )
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable debug mode - drop into pdb debugger on exceptions",
+)
 @click.argument("file_id")
-def download(base_url, api_key, file_id):
+def download(base_url, api_key, debug, file_id):
     """Download file content by FILE_ID and write to stdout.
 
     Example: owui_knowledge_sync.py download abc123 > output.txt
     """
-    response = make_request(
-        method="GET",
-        endpoint=f"/api/v1/files/{file_id}/content",
-        base_url=base_url,
-        api_key=api_key,
-        stream=True,
-    )
+    try:
+        response = make_request(
+            method="GET",
+            endpoint=f"/api/v1/files/{file_id}/content",
+            base_url=base_url,
+            api_key=api_key,
+            stream=True,
+        )
 
-    # Stream content directly to stdout
-    for chunk in response.iter_content(chunk_size=8192):
-        sys.stdout.buffer.write(chunk)
+        # Stream content directly to stdout
+        for chunk in response.iter_content(chunk_size=8192):
+            sys.stdout.buffer.write(chunk)
+    except Exception:
+        if debug:
+            logger.error("Exception occurred, entering debugger...")
+            pdb.post_mortem()
+        raise
 
 
 if __name__ == "__main__":
