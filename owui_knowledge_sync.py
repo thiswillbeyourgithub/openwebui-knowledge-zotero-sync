@@ -759,6 +759,63 @@ def listfiles(base_url, api_key, full, debug):
     help="OpenWebUI API authentication key",
 )
 @click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable debug mode - drop into pdb debugger on exceptions",
+)
+def filesstatus(base_url, api_key, debug):
+    """List files with non-completed status.
+
+    Returns a dict with filename as key and data (excluding content) as value
+    for all files where status is not "completed".
+    """
+    try:
+        response = make_request(
+            method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
+        )
+        files = response.json()
+
+        # Build output dict for files with non-completed status
+        output = {}
+        for file_info in files:
+            data = file_info.get("data", {})
+            status = data.get("status")
+
+            # Only include files where status is not "completed"
+            if status and status != "completed":
+                filename = file_info.get("meta", {}).get(
+                    "name", file_info.get("filename", "unknown")
+                )
+
+                # Copy data but exclude content field
+                data_copy = data.copy()
+                if "content" in data_copy:
+                    del data_copy["content"]
+
+                output[filename] = data_copy
+
+        print(json.dumps(output, indent=2))
+    except Exception:
+        if debug:
+            logger.error("Exception occurred, entering debugger...")
+            pdb.post_mortem()
+        raise
+
+
+@cli.command()
+@click.option(
+    "--base-url",
+    envvar="OPENWEBUI_BASE_URL",
+    default="http://localhost:3000",
+    help="OpenWebUI API base URL",
+)
+@click.option(
+    "--api-key",
+    envvar="OPENWEBUI_API_KEY",
+    required=True,
+    help="OpenWebUI API authentication key",
+)
+@click.option(
     "--kb-id", envvar="OPENWEBUI_KB_ID", required=True, help="Knowledge base ID"
 )
 @click.option(
