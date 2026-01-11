@@ -244,7 +244,7 @@ def upload_file(
     content_type, _ = mimetypes.guess_type(str(filepath))
     if content_type is None:
         content_type = "application/octet-stream"
-    
+
     logger.debug(f"Detected content type: {content_type}")
 
     with open(filepath, "rb") as f:
