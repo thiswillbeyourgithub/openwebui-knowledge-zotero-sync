@@ -654,11 +654,16 @@ def sync(base_url, api_key, kb_id, kbdir_id, file_regex, debug, directory):
     help="OpenWebUI API authentication key",
 )
 @click.option(
+    "--full",
+    is_flag=True,
+    help="Return full knowledge base data instead of simplified output",
+)
+@click.option(
     "--debug",
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
 )
-def listkb(base_url, api_key, debug):
+def listkb(base_url, api_key, full, debug):
     """List all knowledge bases."""
     try:
         response = make_request(
@@ -671,17 +676,20 @@ def listkb(base_url, api_key, debug):
         if "items" in kb_list and "total" in kb_list:
             kb_list = kb_list["items"]
 
-        # Simplify output to show only essential fields
-        simplified = [
-            {
-                "id": kb.get("id"),
-                "name": kb.get("name"),
-                "description": kb.get("description"),
-            }
-            for kb in kb_list
-        ]
+        # Simplify output to show only essential fields, unless --full is specified
+        if full:
+            output = kb_list
+        else:
+            output = [
+                {
+                    "id": kb.get("id"),
+                    "name": kb.get("name"),
+                    "description": kb.get("description"),
+                }
+                for kb in kb_list
+            ]
 
-        print(json.dumps(simplified, indent=2))
+        print(json.dumps(output, indent=2))
     except Exception:
         if debug:
             logger.error("Exception occurred, entering debugger...")
