@@ -663,7 +663,7 @@ def sync(base_url, api_key, kb_id, kbdir_id, file_regex, debug, directory):
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
 )
-def listkb(base_url, api_key, full, debug):
+def list_kb(base_url, api_key, full, debug):
     """List all knowledge bases."""
     try:
         response = make_request(
@@ -720,7 +720,7 @@ def listkb(base_url, api_key, full, debug):
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
 )
-def listfiles(base_url, api_key, full, debug):
+def list_files(base_url, api_key, full, debug):
     """List all uploaded files."""
     try:
         response = make_request(
@@ -763,7 +763,7 @@ def listfiles(base_url, api_key, full, debug):
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
 )
-def filesstatus(base_url, api_key, debug):
+def files_status(base_url, api_key, debug):
     """List files with non-completed status.
 
     Returns a dict with filename as key and data (excluding content) as value
@@ -823,7 +823,7 @@ def filesstatus(base_url, api_key, debug):
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
 )
-def listkbfiles(base_url, api_key, kb_id, debug):
+def list_kb_files(base_url, api_key, kb_id, debug):
     """List files in a specific knowledge base."""
     try:
         response = make_request(
@@ -860,7 +860,7 @@ def listkbfiles(base_url, api_key, kb_id, debug):
     help="Enable debug mode - drop into pdb debugger on exceptions",
 )
 @click.argument("file_id")
-def download(base_url, api_key, debug, file_id):
+def download_file(base_url, api_key, debug, file_id):
     """Download file content by FILE_ID and write to stdout.
 
     Example: owui_knowledge_sync.py download abc123 > output.txt
