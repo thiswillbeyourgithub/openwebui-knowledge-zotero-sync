@@ -120,7 +120,7 @@ class File(BaseModel):
 
     id: str
     user_id: str
-    hash: str
+    hash: Optional[str] = None
     filename: str
     data: Optional[FileData] = None
     meta: FileMeta
