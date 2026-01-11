@@ -736,7 +736,9 @@ def cli():
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default=".",
 )
-def sync(base_url, api_key, kb_id, kb_name, kbdir_id, file_regex, dry, debug, directory):
+def sync(
+    base_url, api_key, kb_id, kb_name, kbdir_id, file_regex, dry, debug, directory
+):
     """Synchronize DIRECTORY with OpenWebUI knowledge base.
 
     All files in the knowledge base belonging to this kbdir-id that don't exist
@@ -966,9 +968,7 @@ def files_status(base_url, api_key, debug):
     required=True,
     help="OpenWebUI API authentication key",
 )
-@click.option(
-    "--kb-id", envvar="OPENWEBUI_KB_ID", help="Knowledge base ID"
-)
+@click.option("--kb-id", envvar="OPENWEBUI_KB_ID", help="Knowledge base ID")
 @click.option(
     "--kb-name",
     envvar="OPENWEBUI_KB_NAME",
@@ -981,7 +981,7 @@ def files_status(base_url, api_key, debug):
 )
 def list_kb_files(base_url, api_key, kb_id, kb_name, debug):
     """List files in a specific knowledge base.
-    
+
     Specify the knowledge base using either --kb-id or --kb-name.
     """
     try:
