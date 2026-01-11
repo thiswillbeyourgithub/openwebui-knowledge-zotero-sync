@@ -476,6 +476,7 @@ def sync_directory(
     api_key: str,
     file_regex: Optional[str] = None,
     dry: bool = False,
+    debug: bool = False,
 ) -> None:
     """Synchronize directory contents with OpenWebUI knowledge base.
 
@@ -502,6 +503,8 @@ def sync_directory(
         Regular expression to filter files for syncing
     dry : bool
         If True, show what would be done without making changes
+    debug : bool
+        If True, raise exceptions immediately instead of continuing
 
     Raises
     ------
@@ -590,6 +593,7 @@ def sync_directory(
     # Step 4: Delete files from KB that don't match local state
     logger.info("Checking for files to delete from knowledge base...")
     deleted_count = 0
+    failed_files = []  # Track files that failed to delete, upload, or add
 
     for kb_file_data in kb_files:
         # Handle both validated File objects and raw dicts
@@ -617,7 +621,14 @@ def sync_directory(
                 )
             else:
                 logger.info(f"Deleting (no longer exists locally): {decoded_name}")
-                remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
+                try:
+                    remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
+                except Exception as e:
+                    logger.error(f"Failed to delete {decoded_name}: {e}")
+                    failed_files.append((decoded_name, f"delete failed - {e}"))
+                    if debug:
+                        raise
+                    continue
             deleted_count += 1
         elif local_mtime and remote_updated_at and local_mtime > remote_updated_at:
             # Local file is newer than remote
@@ -630,7 +641,14 @@ def sync_directory(
             logger.info(f"  Local mtime:        {local_mtime}")
             logger.info(f"  Remote updated_at:  {remote_updated_at}")
             if not dry:
-                remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
+                try:
+                    remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
+                except Exception as e:
+                    logger.error(f"Failed to delete {decoded_name}: {e}")
+                    failed_files.append((decoded_name, f"delete failed - {e}"))
+                    if debug:
+                        raise
+                    continue
             deleted_count += 1
         else:
             # File unchanged or remote is newer
@@ -645,7 +663,6 @@ def sync_directory(
     logger.info("Checking for files to add or update...")
     uploaded_count = 0
     added_count = 0
-    failed_files = []  # Track files that failed to upload or add
 
     for rel_path in local_files:
         local_mtime = local_mtimes[rel_path]
@@ -671,19 +688,26 @@ def sync_directory(
         else:
             logger.info(f"Uploading: {rel_path}")
             abs_path = directory / rel_path
-            upload_result = upload_file(
-                abs_path, rel_path, kbdir_id, base_url, api_key, timeout=600
-            )
+            try:
+                upload_result = upload_file(
+                    abs_path, rel_path, kbdir_id, base_url, api_key, timeout=600
+                )
 
-            if not upload_result.get("id"):
-                logger.error(f"Upload failed for {rel_path}: No file ID in response")
-                logger.error(f"Response: {json.dumps(upload_result, indent=2)}")
-                failed_files.append((rel_path, "upload failed - no file ID"))
+                if not upload_result.get("id"):
+                    logger.error(f"Upload failed for {rel_path}: No file ID in response")
+                    logger.error(f"Response: {json.dumps(upload_result, indent=2)}")
+                    failed_files.append((rel_path, "upload failed - no file ID"))
+                    continue
+
+                file_id = upload_result["id"]
+                logger.info(f"Uploaded successfully: {rel_path} ({file_id})")
+                uploaded_count += 1
+            except Exception as e:
+                logger.error(f"Upload failed for {rel_path}: {e}")
+                failed_files.append((rel_path, f"upload failed - {e}"))
+                if debug:
+                    raise
                 continue
-
-            file_id = upload_result["id"]
-            logger.info(f"Uploaded successfully: {rel_path} ({file_id})")
-            uploaded_count += 1
 
         # Add file to knowledge base
         if dry:
@@ -706,6 +730,8 @@ def sync_directory(
             except requests.exceptions.HTTPError as e:
                 logger.error(f"Failed to add {rel_path} to knowledge base: {e}")
                 failed_files.append((rel_path, f"add to KB failed - {e}"))
+                if debug:
+                    raise
                 continue
 
     # Check for failures and raise exception if any occurred
@@ -812,6 +838,7 @@ def sync(
             api_key=api_key,
             file_regex=file_regex,
             dry=dry,
+            debug=debug,
         )
     except Exception:
         if debug:
