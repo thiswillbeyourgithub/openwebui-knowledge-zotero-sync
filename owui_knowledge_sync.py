@@ -1037,11 +1037,16 @@ def files_status(base_url, api_key, debug):
     help="Knowledge base name (alternative to --kb-id)",
 )
 @click.option(
+    "--full",
+    is_flag=True,
+    help="Return full file data instead of truncated content",
+)
+@click.option(
     "--debug",
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
 )
-def list_kb_files(base_url, api_key, kb_id, kb_name, debug):
+def list_kb_files(base_url, api_key, kb_id, kb_name, full, debug):
     """List files in a specific knowledge base.
 
     Specify the knowledge base using either --kb-id or --kb-name.
@@ -1078,6 +1083,19 @@ def list_kb_files(base_url, api_key, kb_id, kb_name, debug):
         logger.info(
             f"Reconstructed {len(kb_files)} files for knowledge base {resolved_kb_id}"
         )
+
+        # Truncate file content by default unless --full is specified
+        if not full:
+            for file_info in kb_files:
+                if "data" in file_info:
+                    if "content" in file_info["data"]:
+                        content = file_info["data"]["content"]
+                        if isinstance(content, str) and len(content) > 100:
+                            file_info["data"]["content"] = content[:100] + "[TRUNCATED]"
+                    else:
+                        data_str = str(file_info["data"])
+                        if len(data_str) > 100:
+                            file_info["data"] = data_str[:100] + "[TRUNCATED]"
 
         # Replace the files field with our reconstructed list
         kb_data["files"] = kb_files
