@@ -207,7 +207,7 @@ def upload_file(
     kbdir_id: str,
     base_url: str,
     api_key: str,
-    timeout: int = 180,
+    timeout: int = 600,
 ) -> Dict:
     """Upload file to OpenWebUI with encoded filename and wait for processing.
 
@@ -231,7 +231,7 @@ def upload_file(
     api_key : str
         Authentication API key
     timeout : int
-        Maximum time to wait for processing in seconds (default: 180)
+        Maximum time to wait for processing in seconds (default: 600)
 
     Returns
     -------
@@ -679,7 +679,7 @@ def sync_directory(
             logger.info(f"Uploading: {rel_path}")
             abs_path = directory / rel_path
             upload_result = upload_file(
-                abs_path, rel_path, kbdir_id, base_url, api_key, timeout=180
+                abs_path, rel_path, kbdir_id, base_url, api_key, timeout=600
             )
 
             if not upload_result.get("id"):
