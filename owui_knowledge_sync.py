@@ -557,7 +557,9 @@ def sync_directory(
         elif local_mtime and remote_updated_at and local_mtime > remote_updated_at:
             # Local file is newer than remote
             if dry:
-                logger.info(f"[DRY RUN] Would delete (local file is newer): {decoded_name}")
+                logger.info(
+                    f"[DRY RUN] Would delete (local file is newer): {decoded_name}"
+                )
             else:
                 logger.info(f"Deleting (local file is newer): {decoded_name}")
             logger.info(f"  Local mtime:        {local_mtime}")
@@ -604,14 +606,10 @@ def sync_directory(
         else:
             logger.info(f"Uploading: {rel_path}")
             abs_path = directory / rel_path
-            upload_result = upload_file(
-                abs_path, rel_path, kbdir_id, base_url, api_key
-            )
+            upload_result = upload_file(abs_path, rel_path, kbdir_id, base_url, api_key)
 
             if not upload_result.get("id"):
-                logger.error(
-                    f"Upload failed for {rel_path}: No file ID in response"
-                )
+                logger.error(f"Upload failed for {rel_path}: No file ID in response")
                 logger.error(f"Response: {json.dumps(upload_result, indent=2)}")
                 failed_files.append((rel_path, "upload failed - no file ID"))
                 continue
