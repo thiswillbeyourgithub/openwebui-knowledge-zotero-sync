@@ -842,14 +842,18 @@ def list_files(base_url, api_key, full, debug):
         )
         files = response.json()
 
-        # Redact data field by default unless --full is specified
+        # Truncate data field by default unless --full is specified
         if not full:
             for file_info in files:
                 if "data" in file_info:
                     if "content" in file_info["data"]:
-                        file_info["data"]["content"] = "redacted"
+                        content = file_info["data"]["content"]
+                        if isinstance(content, str) and len(content) > 100:
+                            file_info["data"]["content"] = content[:100] + "[TRUNCATED]"
                     else:
-                        file_info["data"] = "redacted"
+                        data_str = str(file_info["data"])
+                        if len(data_str) > 100:
+                            file_info["data"] = data_str[:100] + "[TRUNCATED]"
 
         print(json.dumps(files, indent=2))
     except Exception:
