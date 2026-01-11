@@ -164,7 +164,7 @@ class KnowledgeBase(BaseModel):
     created_at: int
     updated_at: int
     access_control: AccessControl
-    user: User
+    user: Optional[User] = None
     write_access: bool
     meta: Optional[Dict[str, Any]] = None
     files: Optional[List[File]] = Field(default_factory=list)
