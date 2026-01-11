@@ -81,7 +81,7 @@ class FileMeta(BaseModel):
     ----------
     name : str
         Original filename
-    content_type : str
+    content_type : Optional[str]
         MIME type of the file
     size : int
         File size in bytes
@@ -90,7 +90,7 @@ class FileMeta(BaseModel):
     """
 
     name: str
-    content_type: str
+    content_type: Optional[str] = None
     size: int
     data: Optional[Dict[str, Any]] = None
 
