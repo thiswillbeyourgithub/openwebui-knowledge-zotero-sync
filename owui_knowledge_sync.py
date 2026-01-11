@@ -322,6 +322,73 @@ def remove_file_from_kb(file_id: str, kb_id: str, base_url: str, api_key: str) -
     return response.json()
 
 
+def resolve_kb_id(
+    kb_id: Optional[str], kb_name: Optional[str], base_url: str, api_key: str
+) -> str:
+    """Resolve knowledge base name to ID, or return ID if provided.
+
+    Exactly one of kb_id or kb_name must be provided. If kb_name is given,
+    it will be looked up via the API to find the corresponding ID.
+
+    Parameters
+    ----------
+    kb_id : Optional[str]
+        Knowledge base ID (if provided directly)
+    kb_name : Optional[str]
+        Knowledge base name to resolve to ID
+    base_url : str
+        Base API URL
+    api_key : str
+        Authentication API key
+
+    Returns
+    -------
+    str
+        Knowledge base ID
+
+    Raises
+    ------
+    click.ClickException
+        If neither kb_id nor kb_name is provided, both are provided,
+        or if kb_name doesn't match any knowledge base
+    """
+    if kb_id and kb_name:
+        raise click.ClickException(
+            "Cannot specify both --kb-id and --kb-name, choose one"
+        )
+
+    if not kb_id and not kb_name:
+        raise click.ClickException("Either --kb-id or --kb-name must be provided")
+
+    if kb_id:
+        return kb_id
+
+    # Fetch all knowledge bases to find matching name
+    logger.debug(f"Resolving knowledge base name '{kb_name}' to ID...")
+    response = make_request(
+        method="GET",
+        endpoint="/api/v1/knowledge/",
+        base_url=base_url,
+        api_key=api_key,
+    )
+    kb_list = response.json()
+    if "items" in kb_list and "total" in kb_list:
+        kb_list = kb_list["items"]
+
+    # Find KB by name
+    for kb in kb_list:
+        if kb.get("name") == kb_name:
+            resolved_id = kb.get("id")
+            logger.info(f"Resolved knowledge base '{kb_name}' to ID: {resolved_id}")
+            return resolved_id
+
+    # No match found
+    available_names = [kb.get("name") for kb in kb_list if kb.get("name")]
+    raise click.ClickException(
+        f"Knowledge base '{kb_name}' not found. Available: {', '.join(available_names)}"
+    )
+
+
 def sync_directory(
     directory: Path,
     kb_id: str,
@@ -636,8 +703,12 @@ def cli():
 @click.option(
     "--kb-id",
     envvar="OPENWEBUI_KB_ID",
-    required=True,
     help="Knowledge base ID to sync with",
+)
+@click.option(
+    "--kb-name",
+    envvar="OPENWEBUI_KB_NAME",
+    help="Knowledge base name to sync with (alternative to --kb-id)",
 )
 @click.option(
     "--kbdir-id",
@@ -665,17 +736,22 @@ def cli():
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default=".",
 )
-def sync(base_url, api_key, kb_id, kbdir_id, file_regex, dry, debug, directory):
+def sync(base_url, api_key, kb_id, kb_name, kbdir_id, file_regex, dry, debug, directory):
     """Synchronize DIRECTORY with OpenWebUI knowledge base.
 
     All files in the knowledge base belonging to this kbdir-id that don't exist
     locally or have different content will be deleted. All local files will be
     uploaded or updated as needed.
+
+    Specify the knowledge base using either --kb-id or --kb-name.
     """
     try:
+        # Resolve knowledge base name to ID if needed
+        resolved_kb_id = resolve_kb_id(kb_id, kb_name, base_url, api_key)
+
         sync_directory(
             directory=directory,
-            kb_id=kb_id,
+            kb_id=resolved_kb_id,
             kbdir_id=kbdir_id,
             base_url=base_url,
             api_key=api_key,
@@ -891,19 +967,30 @@ def files_status(base_url, api_key, debug):
     help="OpenWebUI API authentication key",
 )
 @click.option(
-    "--kb-id", envvar="OPENWEBUI_KB_ID", required=True, help="Knowledge base ID"
+    "--kb-id", envvar="OPENWEBUI_KB_ID", help="Knowledge base ID"
+)
+@click.option(
+    "--kb-name",
+    envvar="OPENWEBUI_KB_NAME",
+    help="Knowledge base name (alternative to --kb-id)",
 )
 @click.option(
     "--debug",
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
 )
-def list_kb_files(base_url, api_key, kb_id, debug):
-    """List files in a specific knowledge base."""
+def list_kb_files(base_url, api_key, kb_id, kb_name, debug):
+    """List files in a specific knowledge base.
+    
+    Specify the knowledge base using either --kb-id or --kb-name.
+    """
     try:
+        # Resolve knowledge base name to ID if needed
+        resolved_kb_id = resolve_kb_id(kb_id, kb_name, base_url, api_key)
+
         response = make_request(
             method="GET",
-            endpoint=f"/api/v1/knowledge/{kb_id}",
+            endpoint=f"/api/v1/knowledge/{resolved_kb_id}",
             base_url=base_url,
             api_key=api_key,
         )
