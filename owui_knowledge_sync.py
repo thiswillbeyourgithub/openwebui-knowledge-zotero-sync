@@ -329,6 +329,7 @@ def sync_directory(
     base_url: str,
     api_key: str,
     file_regex: Optional[str] = None,
+    dry: bool = False,
 ) -> None:
     """Synchronize directory contents with OpenWebUI knowledge base.
 
@@ -353,13 +354,18 @@ def sync_directory(
         Authentication API key
     file_regex : Optional[str]
         Regular expression to filter files for syncing
+    dry : bool
+        If True, show what would be done without making changes
 
     Raises
     ------
     requests.exceptions.HTTPError
         If any API operation fails
     """
-    logger.info(f"Starting synchronization of {directory}")
+    if dry:
+        logger.info(f"[DRY RUN] Starting synchronization preview of {directory}")
+    else:
+        logger.info(f"Starting synchronization of {directory}")
 
     # Step 1: Build local file inventory with hashes
     logger.info("Scanning local files...")
@@ -470,21 +476,31 @@ def sync_directory(
 
         if decoded_name not in local_files:
             # File no longer exists locally
-            logger.info(f"Deleting (no longer exists locally): {decoded_name}")
-            remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
+            if dry:
+                logger.info(f"[DRY RUN] Would delete (no longer exists locally): {decoded_name}")
+            else:
+                logger.info(f"Deleting (no longer exists locally): {decoded_name}")
+                remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
             deleted_count += 1
         elif local_hash != remote_hash:
             # File exists but content changed
-            logger.info(f"Deleting (content changed): {decoded_name}")
+            if dry:
+                logger.info(f"[DRY RUN] Would delete (content changed): {decoded_name}")
+            else:
+                logger.info(f"Deleting (content changed): {decoded_name}")
             logger.debug(f"  Local hash:  {local_hash}")
             logger.debug(f"  Remote hash: {remote_hash}")
-            remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
+            if not dry:
+                remove_file_from_kb(kb_file["id"], kb_id, base_url, api_key)
             deleted_count += 1
         else:
             # File unchanged
             logger.debug(f"Keeping (unchanged): {decoded_name}")
 
-    logger.info(f"Deleted {deleted_count} files from knowledge base")
+    if dry:
+        logger.info(f"[DRY RUN] Would delete {deleted_count} files from knowledge base")
+    else:
+        logger.info(f"Deleted {deleted_count} files from knowledge base")
 
     # Step 5: Upload and add new or changed files
     logger.info("Checking for files to add or update...")
@@ -515,55 +531,74 @@ def sync_directory(
         # Try to reuse existing file with same name and hash
         if reuse_key in file_by_name_and_hash:
             file_id = file_by_name_and_hash[reuse_key]
-            logger.info(f"Reusing existing file: {rel_path} ({file_id})")
+            if dry:
+                logger.info(f"[DRY RUN] Would reuse existing file: {rel_path} ({file_id})")
+            else:
+                logger.info(f"Reusing existing file: {rel_path} ({file_id})")
             reused_count += 1
         else:
             # Upload new file
-            logger.info(f"Uploading: {rel_path}")
-            abs_path = directory / rel_path
-            upload_result = upload_file(abs_path, rel_path, kbdir_id, base_url, api_key)
-
-            if not upload_result.get("id"):
-                logger.error(f"Upload failed for {rel_path}: No file ID in response")
-                logger.error(f"Response: {json.dumps(upload_result, indent=2)}")
+            if dry:
+                logger.info(f"[DRY RUN] Would upload: {rel_path}")
+                # In dry run, we can't get a real file_id, so skip the add step
+                uploaded_count += 1
                 continue
+            else:
+                logger.info(f"Uploading: {rel_path}")
+                abs_path = directory / rel_path
+                upload_result = upload_file(abs_path, rel_path, kbdir_id, base_url, api_key)
 
-            file_id = upload_result["id"]
-            uploaded_hash = upload_result.get("hash")
+                if not upload_result.get("id"):
+                    logger.error(f"Upload failed for {rel_path}: No file ID in response")
+                    logger.error(f"Response: {json.dumps(upload_result, indent=2)}")
+                    continue
 
-            # Verify hash matches (detects upload corruption or encoding issues)
-            if uploaded_hash and uploaded_hash != local_hash:
-                logger.warning(f"Hash mismatch for {rel_path}:")
-                logger.warning(f"  Local:    {local_hash}")
-                logger.warning(f"  Uploaded: {uploaded_hash}")
-                logger.warning(
-                    "  This may indicate upload corruption or encoding issues"
-                )
+                file_id = upload_result["id"]
+                uploaded_hash = upload_result.get("hash")
 
-            logger.info(f"Uploaded successfully: {rel_path} ({file_id})")
-            uploaded_count += 1
+                # Verify hash matches (detects upload corruption or encoding issues)
+                if uploaded_hash and uploaded_hash != local_hash:
+                    logger.warning(f"Hash mismatch for {rel_path}:")
+                    logger.warning(f"  Local:    {local_hash}")
+                    logger.warning(f"  Uploaded: {uploaded_hash}")
+                    logger.warning(
+                        "  This may indicate upload corruption or encoding issues"
+                    )
+
+                logger.info(f"Uploaded successfully: {rel_path} ({file_id})")
+                uploaded_count += 1
 
         # Add file to knowledge base
-        logger.info(f"Adding to knowledge base: {rel_path}")
-        try:
-            add_result = add_file_to_kb(file_id, kb_id, base_url, api_key)
+        if dry:
+            logger.info(f"[DRY RUN] Would add to knowledge base: {rel_path}")
+            added_count += 1
+        else:
+            logger.info(f"Adding to knowledge base: {rel_path}")
+            try:
+                add_result = add_file_to_kb(file_id, kb_id, base_url, api_key)
 
-            if not add_result.get("id"):
-                logger.error(f"Failed to add {rel_path} to knowledge base")
-                logger.error(f"Response: {json.dumps(add_result, indent=2)}")
+                if not add_result.get("id"):
+                    logger.error(f"Failed to add {rel_path} to knowledge base")
+                    logger.error(f"Response: {json.dumps(add_result, indent=2)}")
+                    continue
+
+                logger.info(f"Added to KB successfully: {rel_path}")
+                added_count += 1
+
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"Failed to add {rel_path} to knowledge base: {e}")
                 continue
 
-            logger.info(f"Added to KB successfully: {rel_path}")
-            added_count += 1
-
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"Failed to add {rel_path} to knowledge base: {e}")
-            continue
-
-    logger.info(
-        f"Upload summary: {uploaded_count} uploaded, {reused_count} reused, {added_count} added to KB"
-    )
-    logger.info("Synchronization completed successfully!")
+    if dry:
+        logger.info(
+            f"[DRY RUN] Summary: {uploaded_count} would be uploaded, {reused_count} would be reused, {added_count} would be added to KB"
+        )
+        logger.info("[DRY RUN] Synchronization preview completed!")
+    else:
+        logger.info(
+            f"Upload summary: {uploaded_count} uploaded, {reused_count} reused, {added_count} added to KB"
+        )
+        logger.info("Synchronization completed successfully!")
 
 
 @click.group()
@@ -608,6 +643,11 @@ def cli():
     help="Regular expression to filter files (e.g., '.*\\.md$' for markdown only)",
 )
 @click.option(
+    "--dry",
+    is_flag=True,
+    help="Dry run - show what would be done without making changes",
+)
+@click.option(
     "--debug",
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
@@ -617,7 +657,7 @@ def cli():
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default=".",
 )
-def sync(base_url, api_key, kb_id, kbdir_id, file_regex, debug, directory):
+def sync(base_url, api_key, kb_id, kbdir_id, file_regex, dry, debug, directory):
     """Synchronize DIRECTORY with OpenWebUI knowledge base.
 
     All files in the knowledge base belonging to this kbdir-id that don't exist
@@ -632,6 +672,7 @@ def sync(base_url, api_key, kb_id, kbdir_id, file_regex, debug, directory):
             base_url=base_url,
             api_key=api_key,
             file_regex=file_regex,
+            dry=dry,
         )
     except Exception:
         if debug:
