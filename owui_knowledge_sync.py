@@ -1,4 +1,15 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#   "click",
+#   "loguru",
+#   "requests",
+#   "tqdm",
+#   "pymupdf",
+#   "pyzotero",
+# ]
+# ///
 """Sync local directory files with OpenWebUI knowledge base.
 
 This script provides a CLI tool to synchronize files from a local directory
