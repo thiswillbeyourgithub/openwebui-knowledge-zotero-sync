@@ -665,7 +665,21 @@ def sync_directory(
     uploaded_count = 0
     added_count = 0
 
-    for rel_path in tqdm(local_files, desc="Uploading and adding files", disable=dry):
+    # Sort files by size (smallest first) for faster initial feedback
+    # Map each file to its size and sort
+    files_with_sizes = []
+    for rel_path in local_files:
+        abs_path = directory / rel_path
+        file_size = abs_path.stat().st_size
+        files_with_sizes.append((rel_path, file_size))
+    
+    # Sort by size (ascending - smallest files first)
+    files_with_sizes.sort(key=lambda x: x[1])
+    sorted_local_files = [rel_path for rel_path, _ in files_with_sizes]
+    
+    logger.debug(f"Sorted {len(sorted_local_files)} files by size for upload")
+
+    for rel_path in tqdm(sorted_local_files, desc="Uploading and adding files", disable=dry):
         local_mtime = local_mtimes[rel_path]
         remote_updated_at = file_updated_at_map.get(rel_path)
 
