@@ -638,8 +638,10 @@ def get_items_with_paths(
                 logger.debug(f"Skipping excluded collection path: {current_path}")
                 return {}
 
-    logger.info(f"Processing collection at path: '{current_path}' (key: {collection_key})")
-    
+    logger.info(
+        f"Processing collection at path: '{current_path}' (key: {collection_key})"
+    )
+
     items_dict = {}
 
     # Get items in this collection
@@ -683,7 +685,9 @@ def get_items_with_paths(
             if not items_dict[item_key]["paths"]:
                 items_dict[item_key]["paths"].append("")
 
-    logger.info(f"After filtering: {len(items_dict)} items with attachments in this collection")
+    logger.info(
+        f"After filtering: {len(items_dict)} items with attachments in this collection"
+    )
 
     # Recursively process subcollections
     subcollections = [
@@ -693,14 +697,16 @@ def get_items_with_paths(
     ]
 
     logger.info(f"Found {len(subcollections)} subcollections")
-    
+
     for subcol in subcollections:
         subcol_name = subcol["data"]["name"]
         # Build new path: current_path%%subcol_name or just subcol_name if at root
         new_path = f"{current_path}%%{subcol_name}" if current_path else subcol_name
 
         # Recursively get items from subcollection
-        sub_items = get_items_with_paths(zot, subcol["key"], all_collections, new_path, excluded_paths)
+        sub_items = get_items_with_paths(
+            zot, subcol["key"], all_collections, new_path, excluded_paths
+        )
 
         # Merge subcollection items into our dict
         for sub_key, sub_data in sub_items.items():
@@ -882,7 +888,7 @@ def sync_zotero_collection(
     logger.info("Fetching all collections from Zotero...")
     all_collections = zot.collections()
     logger.info(f"Retrieved {len(all_collections)} total collections from Zotero")
-    
+
     # Step 2: Get all items with their paths and attachments
     logger.info("Fetching Zotero items and attachments...")
     if excluded_paths:
