@@ -4,6 +4,8 @@ Fork from https://github.com/stoerr/openwebui-knowledgesync
 
 **⚠️ Work in Progress**
 
+This tool is under active development. There are many situations and file types that don't work properly yet. Contributions are welcome! Please feel free to open issues or submit pull requests.
+
 ## What it can do
 
 - **Sync local directories** to OpenWebUI knowledge bases with timestamp-based change detection
