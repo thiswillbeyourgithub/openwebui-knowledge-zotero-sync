@@ -598,6 +598,7 @@ def find_collection_by_path(tree: List[Dict], path_parts: List[str]) -> Optional
 def get_items_with_paths(
     zot: zotero.Zotero,
     collection_key: str,
+    all_collections: List[Dict],
     current_path: str = "",
     excluded_paths: Optional[Set[str]] = None,
 ) -> Dict[str, Dict]:
@@ -614,6 +615,8 @@ def get_items_with_paths(
         Zotero API client instance
     collection_key : str
         Collection key to start from
+    all_collections : List[Dict]
+        Complete list of all collections (fetched once at top level)
     current_path : str
         Current path prefix (used for recursion), with %% as separator
     excluded_paths : Optional[Set[str]]
@@ -635,10 +638,13 @@ def get_items_with_paths(
                 logger.debug(f"Skipping excluded collection path: {current_path}")
                 return {}
 
+    logger.info(f"Processing collection at path: '{current_path}' (key: {collection_key})")
+    
     items_dict = {}
 
     # Get items in this collection
     collection_items = zot.collection_items(collection_key)
+    logger.info(f"Found {len(collection_items)} items directly in this collection")
 
     for item in collection_items:
         # Skip standalone attachments - we only want parent items with attachments
@@ -677,21 +683,24 @@ def get_items_with_paths(
             if not items_dict[item_key]["paths"]:
                 items_dict[item_key]["paths"].append("")
 
+    logger.info(f"After filtering: {len(items_dict)} items with attachments in this collection")
+
     # Recursively process subcollections
-    all_collections = zot.collections()
     subcollections = [
         c
         for c in all_collections
         if c.get("data", {}).get("parentCollection") == collection_key
     ]
 
+    logger.info(f"Found {len(subcollections)} subcollections")
+    
     for subcol in subcollections:
         subcol_name = subcol["data"]["name"]
         # Build new path: current_path%%subcol_name or just subcol_name if at root
         new_path = f"{current_path}%%{subcol_name}" if current_path else subcol_name
 
         # Recursively get items from subcollection
-        sub_items = get_items_with_paths(zot, subcol["key"], new_path, excluded_paths)
+        sub_items = get_items_with_paths(zot, subcol["key"], all_collections, new_path, excluded_paths)
 
         # Merge subcollection items into our dict
         for sub_key, sub_data in sub_items.items():
@@ -869,20 +878,25 @@ def sync_zotero_collection(
     else:
         logger.info(f"Starting Zotero sync for collection '{root_collection_name}'")
 
-    # Step 1: Get all items with their paths and attachments
+    # Step 1: Fetch all collections once at the top level for efficiency
+    logger.info("Fetching all collections from Zotero...")
+    all_collections = zot.collections()
+    logger.info(f"Retrieved {len(all_collections)} total collections from Zotero")
+    
+    # Step 2: Get all items with their paths and attachments
     logger.info("Fetching Zotero items and attachments...")
     if excluded_paths:
         logger.info(
             f"Excluding {len(excluded_paths)} collection path(s): {', '.join(sorted(excluded_paths))}"
         )
     items_dict = get_items_with_paths(
-        zot, collection_key, excluded_paths=excluded_paths
+        zot, collection_key, all_collections, excluded_paths=excluded_paths
     )
     logger.info(
         f"Found {len(items_dict)} items with attachments in collection hierarchy"
     )
 
-    # Step 2: Get existing files in knowledge base
+    # Step 3: Get existing files in knowledge base
     logger.info(f"Fetching existing files in knowledge base {kb_id}...")
     all_files_response = make_request(
         method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
@@ -904,7 +918,7 @@ def sync_zotero_collection(
 
     logger.info(f"Found {len(existing_files)} existing files for kbdir_id '{kbdir_id}'")
 
-    # Step 3: Process each item and its attachments
+    # Step 4: Process each item and its attachments
     uploaded_count = 0
     added_count = 0
     skipped_count = 0
