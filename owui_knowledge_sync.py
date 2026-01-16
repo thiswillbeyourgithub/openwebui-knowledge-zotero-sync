@@ -1524,6 +1524,10 @@ def sync_zotero(
     and uploads them to an OpenWebUI knowledge base. Files are named to preserve
     the collection hierarchy structure.
 
+    Zotero API credentials (--zotero-library-id, --zotero-library-type, and
+    --zotero-api-key) can be provided as command-line options or via environment
+    variables ZOTERO_LIBRARY_ID, ZOTERO_LIBRARY_TYPE, and ZOTERO_API_KEY.
+
     The --zotero-hierarchy parameter specifies the path to the collection using
     %% as the separator (e.g., 'ParentCollection%%SubCollection'). To sync a
     top-level collection, just provide its name.
