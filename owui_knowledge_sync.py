@@ -872,8 +872,12 @@ def sync_zotero_collection(
     # Step 1: Get all items with their paths and attachments
     logger.info("Fetching Zotero items and attachments...")
     if excluded_paths:
-        logger.info(f"Excluding {len(excluded_paths)} collection path(s): {', '.join(sorted(excluded_paths))}")
-    items_dict = get_items_with_paths(zot, collection_key, excluded_paths=excluded_paths)
+        logger.info(
+            f"Excluding {len(excluded_paths)} collection path(s): {', '.join(sorted(excluded_paths))}"
+        )
+    items_dict = get_items_with_paths(
+        zot, collection_key, excluded_paths=excluded_paths
+    )
     logger.info(
         f"Found {len(items_dict)} items with attachments in collection hierarchy"
     )
@@ -1575,15 +1579,17 @@ def sync_zotero(
         if zotero_exclude:
             excluded_paths = set()
             hierarchy_prefix = zotero_hierarchy + "%%"
-            
+
             for exclude_path in zotero_exclude:
                 # Convert absolute exclusion path to relative path
                 # e.g., if hierarchy is "A%%B" and exclusion is "A%%B%%C", relative path is "C"
                 if exclude_path == zotero_hierarchy:
-                    logger.warning(f"Cannot exclude the root collection itself: {exclude_path}")
+                    logger.warning(
+                        f"Cannot exclude the root collection itself: {exclude_path}"
+                    )
                     continue
                 elif exclude_path.startswith(hierarchy_prefix):
-                    relative_path = exclude_path[len(hierarchy_prefix):]
+                    relative_path = exclude_path[len(hierarchy_prefix) :]
                     excluded_paths.add(relative_path)
                     logger.info(f"Will exclude subcollection: {relative_path}")
                 else:
