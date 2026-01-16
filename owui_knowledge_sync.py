@@ -746,7 +746,7 @@ def get_attachment_text(zot: zotero.Zotero, attachment_key: str) -> str:
     """
     # Try Zotero's fulltext API first - this is faster if the file is indexed
     try:
-        text_content = zot.fulltext_item(attachment_key)
+        text_content = zot.fulltext_item(attachment_key)["content"]
         logger.debug(f"Retrieved indexed fulltext for {attachment_key}")
         return text_content
     except Exception as e:
