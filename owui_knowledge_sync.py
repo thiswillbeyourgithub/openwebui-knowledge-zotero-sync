@@ -8,6 +8,7 @@
 #   "tqdm",
 #   "pymupdf",
 #   "pyzotero",
+#   "pydantic",
 # ]
 # ///
 """Sync local directory files with OpenWebUI knowledge base.
