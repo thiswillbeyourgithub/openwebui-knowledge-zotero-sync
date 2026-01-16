@@ -36,32 +36,34 @@ Configure via command-line options or environment variables:
 
 ## Usage
 
+**Recommended**: Use `uv run` to execute the script - it will automatically handle all dependencies via the PEP 723 inline header.
+
 ```bash
 # Sync a directory to a knowledge base
-owui_knowledge_sync.py sync --kb-name "My Knowledge" --kbdir-id mydir /path/to/dir
+uv run owui_knowledge_sync.py sync --kb-name "My Knowledge" --kbdir-id mydir /path/to/dir
 
 # Sync a Zotero collection (extracts text from PDFs)
-owui_knowledge_sync.py sync-zotero \
+uv run owui_knowledge_sync.py sync-zotero \
   --zotero-library-id 123456 \
   --zotero-api-key YOUR_KEY \
   --zotero-hierarchy "Research%%Machine Learning" \
   --kb-name "ML Papers"
 
 # Sync Zotero collection with exclusions
-owui_knowledge_sync.py sync-zotero \
+uv run owui_knowledge_sync.py sync-zotero \
   --zotero-hierarchy "Research" \
   --zotero-exclude "Research%%Archive" \
   --zotero-exclude "Research%%Drafts" \
   --kb-name "Active Research"
 
 # List knowledge bases
-owui_knowledge_sync.py list-kb
+uv run owui_knowledge_sync.py list-kb
 
 # Check file processing status
-owui_knowledge_sync.py files-status
+uv run owui_knowledge_sync.py files-status
 
 # Clean up failed uploads
-owui_knowledge_sync.py prune-files --dry
+uv run owui_knowledge_sync.py prune-files --dry
 ```
 
 Run any command with `--help` for more details.
