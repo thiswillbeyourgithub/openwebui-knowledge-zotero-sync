@@ -42,30 +42,30 @@ Configure via command-line options or environment variables:
 
 ```bash
 # Sync a directory to a knowledge base
-uv run owui_knowledge_sync.py sync --kb-name "My Knowledge" --kbdir-id mydir /path/to/dir
+uv run openwebui_knowledge_zotero_sync.py sync --kb-name "My Knowledge" --kbdir-id mydir /path/to/dir
 
 # Sync a Zotero collection (extracts text from PDFs)
-uv run owui_knowledge_sync.py sync-zotero \
+uv run openwebui_knowledge_zotero_sync.py sync-zotero \
   --zotero-library-id 123456 \
   --zotero-api-key YOUR_KEY \
   --zotero-hierarchy "Research%%Machine Learning" \
   --kb-name "ML Papers"
 
 # Sync Zotero collection with exclusions
-uv run owui_knowledge_sync.py sync-zotero \
+uv run openwebui_knowledge_zotero_sync.py sync-zotero \
   --zotero-hierarchy "Research" \
   --zotero-exclude "Research%%Archive" \
   --zotero-exclude "Research%%Drafts" \
   --kb-name "Active Research"
 
 # List knowledge bases
-uv run owui_knowledge_sync.py list-kb
+uv run openwebui_knowledge_zotero_sync.py list-kb
 
 # Check file processing status
-uv run owui_knowledge_sync.py files-status
+uv run openwebui_knowledge_zotero_sync.py files-status
 
 # Clean up failed uploads
-uv run owui_knowledge_sync.py prune-files --dry
+uv run openwebui_knowledge_zotero_sync.py prune-files --dry
 ```
 
 Run any command with `--help` for more details.
