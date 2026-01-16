@@ -1,4 +1,4 @@
-# OpenWebUI Knowledge Sync
+# OpenWebUI Knowledge Zotero Sync
 
 Fork from https://github.com/stoerr/openwebui-knowledgesync
 
