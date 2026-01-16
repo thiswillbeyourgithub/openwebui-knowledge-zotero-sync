@@ -524,9 +524,7 @@ def build_zotero_collection_tree(
     if parent_key is None:
         # Get top-level collections (no parent or empty parent)
         filtered = [
-            c
-            for c in all_collections
-            if not c.get("data", {}).get("parentCollection")
+            c for c in all_collections if not c.get("data", {}).get("parentCollection")
         ]
     else:
         # Get child collections of the specified parent
@@ -657,7 +655,9 @@ def get_items_with_paths(
     # Recursively process subcollections
     all_collections = zot.collections()
     subcollections = [
-        c for c in all_collections if c.get("data", {}).get("parentCollection") == collection_key
+        c
+        for c in all_collections
+        if c.get("data", {}).get("parentCollection") == collection_key
     ]
 
     for subcol in subcollections:
@@ -710,9 +710,7 @@ def get_attachment_text(zot: zotero.Zotero, attachment_key: str) -> str:
         logger.debug(f"Retrieved indexed fulltext for {attachment_key}")
         return text_content
     except Exception as e:
-        logger.debug(
-            f"Fulltext not indexed for {attachment_key}, downloading PDF: {e}"
-        )
+        logger.debug(f"Fulltext not indexed for {attachment_key}, downloading PDF: {e}")
 
     # Fulltext not available - download PDF and extract text manually
     pdf_bytes = zot.file(attachment_key)
@@ -913,9 +911,7 @@ def sync_zotero_collection(
                     text_content = get_attachment_text(zot, attachment_key)
 
                     if not text_content or not text_content.strip():
-                        logger.warning(
-                            f"No text extracted from {filename}, skipping"
-                        )
+                        logger.warning(f"No text extracted from {filename}, skipping")
                         failed_files.append((filename, "no text content"))
                         pbar.update(1)
                         continue
