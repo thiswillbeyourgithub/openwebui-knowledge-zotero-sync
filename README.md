@@ -7,6 +7,7 @@ Fork from https://github.com/stoerr/openwebui-knowledgesync
 ## What it can do
 
 - **Sync local directories** to OpenWebUI knowledge bases with timestamp-based change detection
+- **Sync Zotero collections** by extracting text from PDF attachments and preserving collection hierarchy
 - **List knowledge bases** with simplified or full output
 - **List all files** in OpenWebUI with optional content truncation
 - **Check file processing status** to find failed uploads
@@ -15,21 +16,43 @@ Fork from https://github.com/stoerr/openwebui-knowledgesync
 - **Download file content** by ID to stdout
 - **Support multiple sync directories** per knowledge base via unique identifiers
 - **Filter files** using regular expressions during sync
+- **Exclude subcollections** from Zotero sync via pattern matching
 - **Dry-run mode** for previewing changes before applying them
 
 ## Configuration
 
-Configure via command-line options or `OPENWEBUI_*` environment variables:
+Configure via command-line options or environment variables:
+
+**OpenWebUI Settings** (`OPENWEBUI_*` prefix):
 - `OPENWEBUI_BASE_URL` - API base URL (default: http://localhost:3000)
 - `OPENWEBUI_API_KEY` - Authentication key (required)
 - `OPENWEBUI_KB_ID` or `OPENWEBUI_KB_NAME` - Knowledge base to sync with
 - `OPENWEBUI_KBDIR_ID` - Unique identifier for sync directory
+
+**Zotero Settings** (`ZOTERO_*` prefix):
+- `ZOTERO_LIBRARY_ID` - Zotero library ID (required for Zotero sync)
+- `ZOTERO_LIBRARY_TYPE` - Library type: 'user' or 'group' (default: user)
+- `ZOTERO_API_KEY` - Zotero API authentication key (required for Zotero sync)
 
 ## Usage
 
 ```bash
 # Sync a directory to a knowledge base
 owui_knowledge_sync.py sync --kb-name "My Knowledge" --kbdir-id mydir /path/to/dir
+
+# Sync a Zotero collection (extracts text from PDFs)
+owui_knowledge_sync.py sync-zotero \
+  --zotero-library-id 123456 \
+  --zotero-api-key YOUR_KEY \
+  --zotero-hierarchy "Research%%Machine Learning" \
+  --kb-name "ML Papers"
+
+# Sync Zotero collection with exclusions
+owui_knowledge_sync.py sync-zotero \
+  --zotero-hierarchy "Research" \
+  --zotero-exclude "Research%%Archive" \
+  --zotero-exclude "Research%%Drafts" \
+  --kb-name "Active Research"
 
 # List knowledge bases
 owui_knowledge_sync.py list-kb
