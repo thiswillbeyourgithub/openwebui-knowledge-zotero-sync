@@ -11,16 +11,20 @@ This tool was developed with assistance from aider.chat.
 
 import json
 import mimetypes
+import os
 import pdb
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import click
+import fitz  # pymupdf - for PDF text extraction
 import requests
 from loguru import logger
+from pyzotero import zotero
 from tqdm import tqdm
 
 from utils.datatypes import File, KnowledgeBase, validate_response
@@ -209,6 +213,7 @@ def upload_file(
     base_url: str,
     api_key: str,
     timeout: int = 600,
+    text_content: Optional[str] = None,
 ) -> Dict:
     """Upload file to OpenWebUI with encoded filename and wait for processing.
 
@@ -233,6 +238,9 @@ def upload_file(
         Authentication API key
     timeout : int
         Maximum time to wait for processing in seconds (default: 600)
+    text_content : Optional[str]
+        If provided, write this text to a temporary file and upload that instead
+        of reading from filepath. This allows uploading text content directly.
 
     Returns
     -------
@@ -249,87 +257,107 @@ def upload_file(
     encoded_name = encode_filename(relative_path, kbdir_id)
     logger.debug(f"Uploading {relative_path} as {encoded_name}")
 
-    # Detect MIME type based on file extension
-    content_type, _ = mimetypes.guess_type(str(filepath))
+    # If text_content is provided, create a temporary file with that content
+    # This allows uploading text extracted from PDFs or other sources
+    temp_file = None
+    if text_content is not None:
+        temp_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        )
+        temp_file.write(text_content)
+        temp_file.close()
+        filepath = Path(temp_file.name)
+        content_type = "text/plain"
+    else:
+        # Detect MIME type based on file extension
+        content_type, _ = mimetypes.guess_type(str(filepath))
 
     logger.debug(f"Detected content type: {content_type}")
 
-    if content_type == "text/plain":
-        file = open(filepath, "r")
-    else:
-        file = open(filepath, "rb")
+    try:
+        if content_type == "text/plain":
+            file = open(filepath, "r", encoding="utf-8")
+        else:
+            file = open(filepath, "rb")
 
-    # files = {"file": file}
-    if not content_type:
-        files = {"file": (encoded_name, file)}
-    else:
-        files = {"file": (encoded_name, file, content_type)}
-    response = make_request(
-        method="POST",
-        endpoint="/api/v1/files/",
-        base_url=base_url,
-        api_key=api_key,
-        files=files,
-    )
+        if not content_type:
+            files = {"file": (encoded_name, file)}
+        else:
+            files = {"file": (encoded_name, file, content_type)}
 
-    out = response.json()
-    file_id = out.get("id")
-
-    if not file_id:
-        raise click.ClickException(
-            f"Upload failed for {relative_path}: No file ID in response"
-        )
-
-    # Wait for OpenWebUI to finish processing the file
-    logger.info(f"Waiting for {relative_path} to be processed...")
-    start_time = time.time()
-    poll_interval = 5  # Poll every 5 seconds
-
-    while True:
-        elapsed = time.time() - start_time
-
-        if elapsed > timeout:
-            raise click.ClickException(
-                f"Timeout waiting for {relative_path} to be processed (>{timeout}s)"
-            )
-
-        # Get current file status
-        file_response = make_request(
-            method="GET",
-            endpoint=f"/api/v1/files/{file_id}",
+        response = make_request(
+            method="POST",
+            endpoint="/api/v1/files/",
             base_url=base_url,
             api_key=api_key,
-        )
-        file_data = file_response.json()
-
-        # Check processing status
-        data = file_data.get("data", {})
-        status = data.get("status")
-        content = data.get("content", "")
-
-        logger.debug(
-            f"File {relative_path} status: {status}, content length: {len(content)}"
+            files=files,
         )
 
-        # Check if processing failed
-        if status == "failed":
-            error_msg = data.get("error", "Unknown error")
+        out = response.json()
+        file_id = out.get("id")
+
+        if not file_id:
             raise click.ClickException(
-                f"Processing failed for {relative_path}: {error_msg}"
+                f"Upload failed for {relative_path}: No file ID in response"
             )
 
-        # Check if processing is complete (content is non-empty)
-        if content:
-            logger.info(
-                f"File {relative_path} processed successfully in {elapsed:.1f}s"
-            )
-            return out
+        # Wait for OpenWebUI to finish processing the file
+        logger.info(f"Waiting for {relative_path} to be processed...")
+        start_time = time.time()
+        poll_interval = 5  # Poll every 5 seconds
 
-        # Wait before next poll
-        logger.debug(
-            f"File {relative_path} still processing... ({elapsed:.1f}s elapsed)"
-        )
-        time.sleep(poll_interval)
+        while True:
+            elapsed = time.time() - start_time
+
+            if elapsed > timeout:
+                raise click.ClickException(
+                    f"Timeout waiting for {relative_path} to be processed (>{timeout}s)"
+                )
+
+            # Get current file status
+            file_response = make_request(
+                method="GET",
+                endpoint=f"/api/v1/files/{file_id}",
+                base_url=base_url,
+                api_key=api_key,
+            )
+            file_data = file_response.json()
+
+            # Check processing status
+            data = file_data.get("data", {})
+            status = data.get("status")
+            content = data.get("content", "")
+
+            logger.debug(
+                f"File {relative_path} status: {status}, content length: {len(content)}"
+            )
+
+            # Check if processing failed
+            if status == "failed":
+                error_msg = data.get("error", "Unknown error")
+                raise click.ClickException(
+                    f"Processing failed for {relative_path}: {error_msg}"
+                )
+
+            # Check if processing is complete (content is non-empty)
+            if content:
+                logger.info(
+                    f"File {relative_path} processed successfully in {elapsed:.1f}s"
+                )
+                return out
+
+            # Wait before next poll
+            logger.debug(
+                f"File {relative_path} still processing... ({elapsed:.1f}s elapsed)"
+            )
+            time.sleep(poll_interval)
+    finally:
+        # Clean up temporary file if we created one
+        if temp_file is not None:
+            try:
+                os.unlink(temp_file.name)
+            except Exception as e:
+                logger.warning(f"Failed to delete temporary file: {e}")
 
 
 def add_file_to_kb(file_id: str, kb_id: str, base_url: str, api_key: str) -> Dict:
@@ -467,6 +495,520 @@ def resolve_kb_id(
     raise click.ClickException(
         f"Knowledge base '{kb_name}' not found. Available: {', '.join(available_names)}"
     )
+
+
+def build_zotero_collection_tree(
+    zot: zotero.Zotero, parent_key: Optional[str] = None
+) -> List[Dict]:
+    """Build hierarchical tree of Zotero collections.
+
+    Recursively constructs a tree structure of collections, starting from
+    the top level (parent_key=None) or from a specific parent collection.
+
+    Parameters
+    ----------
+    zot : zotero.Zotero
+        Zotero API client instance
+    parent_key : Optional[str]
+        Parent collection key to start from. If None, starts from top-level collections.
+
+    Returns
+    -------
+    List[Dict]
+        List of collection tree nodes, each with 'key', 'name', and 'children' keys
+    """
+    all_collections = zot.collections()
+
+    # Filter collections by parent - top-level collections have no parentCollection field
+    # or it's an empty string, while child collections have a parentCollection key
+    if parent_key is None:
+        # Get top-level collections (no parent or empty parent)
+        filtered = [
+            c
+            for c in all_collections
+            if not c.get("data", {}).get("parentCollection")
+        ]
+    else:
+        # Get child collections of the specified parent
+        filtered = [
+            c
+            for c in all_collections
+            if c.get("data", {}).get("parentCollection") == parent_key
+        ]
+
+    tree = []
+    for collection in filtered:
+        node = {
+            "key": collection["key"],
+            "name": collection["data"]["name"],
+            "children": build_zotero_collection_tree(zot, collection["key"]),
+        }
+        tree.append(node)
+
+    return tree
+
+
+def find_collection_by_path(tree: List[Dict], path_parts: List[str]) -> Optional[Dict]:
+    """Find collection node in tree by navigating path components.
+
+    Traverses the collection tree following the path specified by path_parts.
+    Each part represents a collection name to descend into.
+
+    Parameters
+    ----------
+    tree : List[Dict]
+        Collection tree structure from build_zotero_collection_tree()
+    path_parts : List[str]
+        List of collection names forming the path (e.g., ['A', 'B', 'C'])
+
+    Returns
+    -------
+    Optional[Dict]
+        The matching collection node with 'key', 'name', 'children' keys,
+        or None if path not found
+    """
+    # If path is empty, return the entire tree (None signals to use root)
+    if not path_parts:
+        return None
+
+    # Search for the first part in the current level
+    target_name = path_parts[0]
+    for node in tree:
+        if node["name"] == target_name:
+            # Found the node - if this is the last part, return it
+            if len(path_parts) == 1:
+                return node
+            # Otherwise, recurse into children
+            return find_collection_by_path(node["children"], path_parts[1:])
+
+    # Not found
+    return None
+
+
+def get_items_with_paths(
+    zot: zotero.Zotero, collection_key: str, current_path: str = ""
+) -> Dict[str, Dict]:
+    """Recursively get all items in collection with their subcollection paths.
+
+    Traverses a collection and all its subcollections, collecting items and
+    their PDF attachments. Items that appear in multiple subcollections will
+    have multiple paths recorded. Paths are relative to the root collection
+    being synced (not including the root collection name itself).
+
+    Parameters
+    ----------
+    zot : zotero.Zotero
+        Zotero API client instance
+    collection_key : str
+        Collection key to start from
+    current_path : str
+        Current path prefix (used for recursion), with %% as separator
+
+    Returns
+    -------
+    Dict[str, Dict]
+        Dict mapping item_key to dict with:
+        - 'title': item title
+        - 'paths': list of collection path strings (e.g., ["SubCol1", "SubCol1%%SubCol2"])
+        - 'attachments': list of attachment keys for this item
+    """
+    items_dict = {}
+
+    # Get items in this collection
+    collection_items = zot.collection_items(collection_key)
+
+    for item in collection_items:
+        # Skip standalone attachments - we only want parent items with attachments
+        if item.get("data", {}).get("itemType") == "attachment":
+            continue
+
+        item_key = item["key"]
+        item_title = item.get("data", {}).get("title", "Untitled")
+
+        # Get attachments for this item
+        children = zot.children(item_key)
+        attachment_keys = [
+            child["key"]
+            for child in children
+            if child.get("data", {}).get("itemType") == "attachment"
+        ]
+
+        # Skip items with no attachments - nothing to sync
+        if not attachment_keys:
+            continue
+
+        # Add or update item in dictionary
+        if item_key not in items_dict:
+            items_dict[item_key] = {
+                "title": item_title,
+                "paths": [],
+                "attachments": attachment_keys,
+            }
+
+        # Add current path to the item's paths list (excluding empty root path)
+        if current_path:
+            if current_path not in items_dict[item_key]["paths"]:
+                items_dict[item_key]["paths"].append(current_path)
+        else:
+            # Item is in root collection - mark with empty string if no paths yet
+            if not items_dict[item_key]["paths"]:
+                items_dict[item_key]["paths"].append("")
+
+    # Recursively process subcollections
+    all_collections = zot.collections()
+    subcollections = [
+        c for c in all_collections if c.get("data", {}).get("parentCollection") == collection_key
+    ]
+
+    for subcol in subcollections:
+        subcol_name = subcol["data"]["name"]
+        # Build new path: current_path%%subcol_name or just subcol_name if at root
+        new_path = f"{current_path}%%{subcol_name}" if current_path else subcol_name
+
+        # Recursively get items from subcollection
+        sub_items = get_items_with_paths(zot, subcol["key"], new_path)
+
+        # Merge subcollection items into our dict
+        for sub_key, sub_data in sub_items.items():
+            if sub_key not in items_dict:
+                items_dict[sub_key] = sub_data
+            else:
+                # Item already exists - merge paths
+                for path in sub_data["paths"]:
+                    if path not in items_dict[sub_key]["paths"]:
+                        items_dict[sub_key]["paths"].append(path)
+
+    return items_dict
+
+
+def get_attachment_text(zot: zotero.Zotero, attachment_key: str) -> str:
+    """Extract text content from a Zotero attachment.
+
+    First attempts to use Zotero's fulltext API (faster if already indexed).
+    If that fails, downloads the PDF and extracts text using PyMuPDF.
+
+    Parameters
+    ----------
+    zot : zotero.Zotero
+        Zotero API client instance
+    attachment_key : str
+        Attachment item key
+
+    Returns
+    -------
+    str
+        Extracted text content from the attachment
+
+    Raises
+    ------
+    Exception
+        If text extraction fails for any reason
+    """
+    # Try Zotero's fulltext API first - this is faster if the file is indexed
+    try:
+        text_content = zot.fulltext_item(attachment_key)
+        logger.debug(f"Retrieved indexed fulltext for {attachment_key}")
+        return text_content
+    except Exception as e:
+        logger.debug(
+            f"Fulltext not indexed for {attachment_key}, downloading PDF: {e}"
+        )
+
+    # Fulltext not available - download PDF and extract text manually
+    pdf_bytes = zot.file(attachment_key)
+
+    # Write to temporary file and extract text with PyMuPDF
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
+        tmp_file.write(pdf_bytes)
+        tmp_path = tmp_file.name
+
+    try:
+        # Open PDF and extract text from all pages
+        doc = fitz.open(tmp_path)
+        text_content = "".join(page.get_text() for page in doc)
+        doc.close()
+        logger.debug(f"Extracted {len(text_content)} chars from PDF {attachment_key}")
+        return text_content
+    finally:
+        # Clean up temporary file
+        try:
+            os.unlink(tmp_path)
+        except Exception as e:
+            logger.warning(f"Failed to delete temporary PDF file: {e}")
+
+
+def generate_zotero_filename(
+    title: str, paths: List[str], attachment_index: int
+) -> str:
+    """Generate encoded filename for Zotero item with attachment.
+
+    Creates a filename that encodes the item's location in the collection
+    hierarchy and handles items that appear in multiple subcollections.
+
+    Filename format:
+    - Root collection only: {title}.txt or {title}_2.txt for additional attachments
+    - Single subcollection: {path}%%{title}.txt
+    - Multiple subcollections: {path1}&&{path2}%%{title}.txt
+
+    Parameters
+    ----------
+    title : str
+        Item title (will be sanitized)
+    paths : List[str]
+        List of collection paths where this item appears
+    attachment_index : int
+        Index of attachment (0 for first, 1 for second, etc.)
+
+    Returns
+    -------
+    str
+        Generated filename with .txt extension
+    """
+    # Sanitize title - replace path separators with underscores
+    sanitized_title = title.replace("/", "_").replace("\\", "_")
+
+    # Build path prefix based on number of paths
+    if not paths or (len(paths) == 1 and paths[0] == ""):
+        # Item only in root collection
+        path_prefix = ""
+    elif len(paths) == 1:
+        # Item in single subcollection
+        path_prefix = f"{paths[0]}%%"
+    else:
+        # Item in multiple subcollections - sort paths and join with &&
+        sorted_paths = sorted(paths)
+        joined_paths = "&&".join(sorted_paths)
+        path_prefix = f"{joined_paths}%%"
+
+    # Add attachment index suffix if needed (for items with multiple attachments)
+    if attachment_index > 0:
+        suffix = f"_{attachment_index + 1}"
+    else:
+        suffix = ""
+
+    return f"{path_prefix}{sanitized_title}{suffix}.txt"
+
+
+def sync_zotero_collection(
+    zot: zotero.Zotero,
+    collection_key: str,
+    root_collection_name: str,
+    kb_id: str,
+    kbdir_id: str,
+    base_url: str,
+    api_key: str,
+    dry: bool = False,
+    debug: bool = False,
+) -> None:
+    """Synchronize Zotero collection to OpenWebUI knowledge base.
+
+    Extracts text content from PDF attachments in a Zotero collection and
+    uploads them to an OpenWebUI knowledge base. Files are named to encode
+    their position in the collection hierarchy, allowing items to be organized
+    and supporting items that appear in multiple subcollections.
+
+    Unlike directory sync, this is upload-only - existing files in the KB
+    are not deleted. Files with matching names are skipped (assumed up-to-date).
+
+    Parameters
+    ----------
+    zot : zotero.Zotero
+        Zotero API client instance
+    collection_key : str
+        Zotero collection key to sync
+    root_collection_name : str
+        Name of root collection (for logging)
+    kb_id : str
+        Knowledge base ID
+    kbdir_id : str
+        Knowledge base directory identifier for file naming
+    base_url : str
+        Base API URL
+    api_key : str
+        Authentication API key
+    dry : bool
+        If True, show what would be done without making changes
+    debug : bool
+        If True, raise exceptions immediately instead of continuing
+
+    Raises
+    ------
+    click.ClickException
+        If sync completes with failures and not in dry run mode
+    """
+    if dry:
+        logger.info(
+            f"[DRY RUN] Starting Zotero sync preview for collection '{root_collection_name}'"
+        )
+    else:
+        logger.info(f"Starting Zotero sync for collection '{root_collection_name}'")
+
+    # Step 1: Get all items with their paths and attachments
+    logger.info("Fetching Zotero items and attachments...")
+    items_dict = get_items_with_paths(zot, collection_key)
+    logger.info(
+        f"Found {len(items_dict)} items with attachments in collection hierarchy"
+    )
+
+    # Step 2: Get existing files in knowledge base
+    logger.info(f"Fetching existing files in knowledge base {kb_id}...")
+    all_files_response = make_request(
+        method="GET", endpoint="/api/v1/files/", base_url=base_url, api_key=api_key
+    )
+    all_files = all_files_response.json()
+
+    # Build set of existing filenames for this kbdir_id
+    existing_files = set()
+    for file_info in all_files:
+        # Only consider files in this knowledge base
+        if file_info.get("meta", {}).get("collection_name") != kb_id:
+            continue
+
+        encoded_name = file_info.get("meta", {}).get("name", "")
+        decoded_name = decode_filename(encoded_name, kbdir_id)
+
+        if decoded_name is not None:
+            existing_files.add(decoded_name)
+
+    logger.info(f"Found {len(existing_files)} existing files for kbdir_id '{kbdir_id}'")
+
+    # Step 3: Process each item and its attachments
+    uploaded_count = 0
+    added_count = 0
+    skipped_count = 0
+    failed_files = []
+
+    # Calculate total attachments for progress bar
+    total_attachments = sum(len(item["attachments"]) for item in items_dict.values())
+
+    with tqdm(
+        total=total_attachments, desc="Processing attachments", disable=dry
+    ) as pbar:
+        for item_key, item_data in items_dict.items():
+            title = item_data["title"]
+            paths = item_data["paths"]
+            attachments = item_data["attachments"]
+
+            for idx, attachment_key in enumerate(attachments):
+                # Generate filename for this attachment
+                filename = generate_zotero_filename(title, paths, idx)
+
+                # Check if file already exists in KB
+                if filename in existing_files:
+                    logger.debug(f"Skipping (already in KB): {filename}")
+                    skipped_count += 1
+                    pbar.update(1)
+                    continue
+
+                # File needs to be uploaded
+                if dry:
+                    logger.info(f"[DRY RUN] Would upload: {filename}")
+                    uploaded_count += 1
+                    pbar.update(1)
+                    continue
+
+                # Extract text content from attachment
+                logger.info(f"Extracting text from: {title} (attachment {idx + 1})")
+                try:
+                    text_content = get_attachment_text(zot, attachment_key)
+
+                    if not text_content or not text_content.strip():
+                        logger.warning(
+                            f"No text extracted from {filename}, skipping"
+                        )
+                        failed_files.append((filename, "no text content"))
+                        pbar.update(1)
+                        continue
+
+                    logger.info(
+                        f"Extracted {len(text_content)} characters from {filename}"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to extract text from {filename}: {e}")
+                    failed_files.append((filename, f"text extraction failed - {e}"))
+                    if debug:
+                        raise
+                    pbar.update(1)
+                    continue
+
+                # Upload text content as a file
+                logger.info(f"Uploading: {filename}")
+                try:
+                    # Create a dummy path for the filename - upload_file will create temp file
+                    dummy_path = Path(filename)
+                    upload_result = upload_file(
+                        filepath=dummy_path,
+                        relative_path=filename,
+                        kbdir_id=kbdir_id,
+                        base_url=base_url,
+                        api_key=api_key,
+                        timeout=600,
+                        text_content=text_content,
+                    )
+
+                    if not upload_result.get("id"):
+                        logger.error(
+                            f"Upload failed for {filename}: No file ID in response"
+                        )
+                        failed_files.append((filename, "upload failed - no file ID"))
+                        pbar.update(1)
+                        continue
+
+                    file_id = upload_result["id"]
+                    logger.info(f"Uploaded successfully: {filename} ({file_id})")
+                    uploaded_count += 1
+                except Exception as e:
+                    logger.error(f"Upload failed for {filename}: {e}")
+                    failed_files.append((filename, f"upload failed - {e}"))
+                    if debug:
+                        raise
+                    pbar.update(1)
+                    continue
+
+                # Add file to knowledge base
+                logger.info(f"Adding to knowledge base: {filename}")
+                try:
+                    add_result = add_file_to_kb(file_id, kb_id, base_url, api_key)
+
+                    if not add_result.get("id"):
+                        logger.error(f"Failed to add {filename} to knowledge base")
+                        failed_files.append((filename, "add to KB failed - no KB ID"))
+                        pbar.update(1)
+                        continue
+
+                    logger.info(f"Added to KB successfully: {filename}")
+                    added_count += 1
+                except requests.exceptions.HTTPError as e:
+                    logger.error(f"Failed to add {filename} to knowledge base: {e}")
+                    failed_files.append((filename, f"add to KB failed - {e}"))
+                    if debug:
+                        raise
+                    pbar.update(1)
+                    continue
+
+                pbar.update(1)
+
+    # Check for failures and raise exception if any occurred
+    if failed_files and not dry:
+        error_summary = "\n".join(
+            f"  - {path}: {reason}" for path, reason in failed_files
+        )
+        raise click.ClickException(
+            f"Zotero sync completed with {len(failed_files)} failures:\n{error_summary}"
+        )
+
+    if dry:
+        logger.info(
+            f"[DRY RUN] Summary: {uploaded_count} would be uploaded, "
+            f"{added_count} would be added to KB, {skipped_count} already in KB"
+        )
+        logger.info("[DRY RUN] Zotero synchronization preview completed!")
+    else:
+        logger.info(
+            f"Upload summary: {uploaded_count} uploaded, {added_count} added to KB, "
+            f"{skipped_count} skipped (already in KB)"
+        )
+        logger.info("Zotero synchronization completed successfully!")
 
 
 def sync_directory(
@@ -862,6 +1404,157 @@ def sync(
     except Exception:
         if debug:
             logger.exception("Exception occurred during sync:")
+            logger.error("Entering debugger...")
+            pdb.post_mortem()
+        raise
+
+
+@cli.command()
+@click.option(
+    "--base-url",
+    envvar="OPENWEBUI_BASE_URL",
+    default="http://localhost:3000",
+    help="OpenWebUI API base URL",
+)
+@click.option(
+    "--api-key",
+    envvar="OPENWEBUI_API_KEY",
+    required=True,
+    help="OpenWebUI API authentication key",
+)
+@click.option(
+    "--zotero-library-id",
+    envvar="ZOTERO_LIBRARY_ID",
+    required=True,
+    help="Zotero library ID",
+)
+@click.option(
+    "--zotero-library-type",
+    envvar="ZOTERO_LIBRARY_TYPE",
+    default="user",
+    help="Zotero library type (user or group)",
+)
+@click.option(
+    "--zotero-api-key",
+    envvar="ZOTERO_API_KEY",
+    required=True,
+    help="Zotero API key",
+)
+@click.option(
+    "--zotero-hierarchy",
+    required=True,
+    help="Collection hierarchy path (e.g., 'A%%B%%C' or 'TopLevel' for root)",
+)
+@click.option(
+    "--kb-id",
+    envvar="OPENWEBUI_KB_ID",
+    help="Knowledge base ID",
+)
+@click.option(
+    "--kb-name",
+    envvar="OPENWEBUI_KB_NAME",
+    help="Knowledge base name (alternative to --kb-id)",
+)
+@click.option(
+    "--kbdir-id",
+    help="Unique identifier for this sync (defaults to collection name)",
+)
+@click.option(
+    "--dry",
+    is_flag=True,
+    help="Dry run - show what would be done without making changes",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable debug mode - drop into pdb debugger on exceptions",
+)
+def sync_zotero(
+    base_url,
+    api_key,
+    zotero_library_id,
+    zotero_library_type,
+    zotero_api_key,
+    zotero_hierarchy,
+    kb_id,
+    kb_name,
+    kbdir_id,
+    dry,
+    debug,
+):
+    """Sync Zotero collection to OpenWebUI knowledge base.
+
+    Extracts text content from PDF attachments in the specified Zotero collection
+    and uploads them to an OpenWebUI knowledge base. Files are named to preserve
+    the collection hierarchy structure.
+
+    The --zotero-hierarchy parameter specifies the path to the collection using
+    %% as the separator (e.g., 'ParentCollection%%SubCollection'). To sync a
+    top-level collection, just provide its name.
+
+    Specify the knowledge base using either --kb-id or --kb-name.
+    """
+    try:
+        # Initialize Zotero client
+        logger.info(
+            f"Connecting to Zotero library {zotero_library_id} ({zotero_library_type})"
+        )
+        zot = zotero.Zotero(zotero_library_id, zotero_library_type, zotero_api_key)
+
+        # Parse hierarchy path
+        path_parts = zotero_hierarchy.split("%%")
+        logger.info(f"Looking for collection path: {' > '.join(path_parts)}")
+
+        # Build collection tree
+        logger.info("Building collection tree...")
+        tree = build_zotero_collection_tree(zot)
+
+        # Find target collection
+        target_node = find_collection_by_path(tree, path_parts)
+
+        if target_node is None:
+            # Collection not found - build helpful error message
+            available = []
+
+            def collect_names(nodes, prefix=""):
+                for node in nodes:
+                    path = f"{prefix}{node['name']}"
+                    available.append(path)
+                    if node["children"]:
+                        collect_names(node["children"], f"{path}%%")
+
+            collect_names(tree)
+
+            raise click.ClickException(
+                f"Collection '{zotero_hierarchy}' not found.\n"
+                f"Available collections:\n  " + "\n  ".join(sorted(available))
+            )
+
+        collection_key = target_node["key"]
+        collection_name = target_node["name"]
+        logger.info(f"Found collection '{collection_name}' (key: {collection_key})")
+
+        # Resolve KB ID
+        resolved_kb_id = resolve_kb_id(kb_id, kb_name, base_url, api_key)
+
+        # Use kbdir_id if provided, otherwise use collection name
+        resolved_kbdir_id = kbdir_id if kbdir_id else collection_name
+
+        # Sync the collection
+        sync_zotero_collection(
+            zot=zot,
+            collection_key=collection_key,
+            root_collection_name=collection_name,
+            kb_id=resolved_kb_id,
+            kbdir_id=resolved_kbdir_id,
+            base_url=base_url,
+            api_key=api_key,
+            dry=dry,
+            debug=debug,
+        )
+    except Exception:
+        if debug:
+            logger.exception("Exception occurred during Zotero sync:")
             logger.error("Entering debugger...")
             pdb.post_mortem()
         raise
