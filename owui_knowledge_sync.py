@@ -596,7 +596,10 @@ def find_collection_by_path(tree: List[Dict], path_parts: List[str]) -> Optional
 
 
 def get_items_with_paths(
-    zot: zotero.Zotero, collection_key: str, current_path: str = ""
+    zot: zotero.Zotero,
+    collection_key: str,
+    current_path: str = "",
+    excluded_paths: Optional[Set[str]] = None,
 ) -> Dict[str, Dict]:
     """Recursively get all items in collection with their subcollection paths.
 
@@ -613,6 +616,8 @@ def get_items_with_paths(
         Collection key to start from
     current_path : str
         Current path prefix (used for recursion), with %% as separator
+    excluded_paths : Optional[Set[str]]
+        Set of collection paths to exclude from syncing (relative to sync root)
 
     Returns
     -------
@@ -622,6 +627,14 @@ def get_items_with_paths(
         - 'paths': list of collection path strings (e.g., ["SubCol1", "SubCol1%%SubCol2"])
         - 'attachments': list of attachment keys for this item
     """
+    # Skip this collection if it matches an exclusion pattern
+    if excluded_paths and current_path:
+        for excluded in excluded_paths:
+            # Check if current path is the excluded path or a child of it
+            if current_path == excluded or current_path.startswith(f"{excluded}%%"):
+                logger.debug(f"Skipping excluded collection path: {current_path}")
+                return {}
+
     items_dict = {}
 
     # Get items in this collection
@@ -678,7 +691,7 @@ def get_items_with_paths(
         new_path = f"{current_path}%%{subcol_name}" if current_path else subcol_name
 
         # Recursively get items from subcollection
-        sub_items = get_items_with_paths(zot, subcol["key"], new_path)
+        sub_items = get_items_with_paths(zot, subcol["key"], new_path, excluded_paths)
 
         # Merge subcollection items into our dict
         for sub_key, sub_data in sub_items.items():
@@ -807,6 +820,7 @@ def sync_zotero_collection(
     kbdir_id: str,
     base_url: str,
     api_key: str,
+    excluded_paths: Optional[Set[str]] = None,
     dry: bool = False,
     debug: bool = False,
 ) -> None:
@@ -836,6 +850,8 @@ def sync_zotero_collection(
         Base API URL
     api_key : str
         Authentication API key
+    excluded_paths : Optional[Set[str]]
+        Set of collection paths to exclude from syncing (relative to sync root)
     dry : bool
         If True, show what would be done without making changes
     debug : bool
@@ -855,7 +871,9 @@ def sync_zotero_collection(
 
     # Step 1: Get all items with their paths and attachments
     logger.info("Fetching Zotero items and attachments...")
-    items_dict = get_items_with_paths(zot, collection_key)
+    if excluded_paths:
+        logger.info(f"Excluding {len(excluded_paths)} collection path(s): {', '.join(sorted(excluded_paths))}")
+    items_dict = get_items_with_paths(zot, collection_key, excluded_paths=excluded_paths)
     logger.info(
         f"Found {len(items_dict)} items with attachments in collection hierarchy"
     )
@@ -1454,6 +1472,11 @@ def sync(
     help="Collection hierarchy path (e.g., 'A%%B%%C' or 'TopLevel' for root)",
 )
 @click.option(
+    "--zotero-exclude",
+    multiple=True,
+    help="Collection hierarchy paths to exclude (e.g., 'A%%B%%C'). Can be specified multiple times.",
+)
+@click.option(
     "--kb-id",
     envvar="OPENWEBUI_KB_ID",
     help="Knowledge base ID",
@@ -1484,6 +1507,7 @@ def sync_zotero(
     zotero_library_type,
     zotero_api_key,
     zotero_hierarchy,
+    zotero_exclude,
     kb_id,
     kb_name,
     kbdir_id,
@@ -1499,6 +1523,10 @@ def sync_zotero(
     The --zotero-hierarchy parameter specifies the path to the collection using
     %% as the separator (e.g., 'ParentCollection%%SubCollection'). To sync a
     top-level collection, just provide its name.
+
+    The --zotero-exclude parameter allows excluding specific subcollections from
+    syncing. Specify the full hierarchy path (e.g., 'A%%B%%C' to exclude subcollection
+    C when syncing A%%B). Can be specified multiple times to exclude multiple paths.
 
     Specify the knowledge base using either --kb-id or --kb-name.
     """
@@ -1542,6 +1570,27 @@ def sync_zotero(
         collection_name = target_node["name"]
         logger.info(f"Found collection '{collection_name}' (key: {collection_key})")
 
+        # Process exclusion list - convert from absolute to relative paths
+        excluded_paths = None
+        if zotero_exclude:
+            excluded_paths = set()
+            hierarchy_prefix = zotero_hierarchy + "%%"
+            
+            for exclude_path in zotero_exclude:
+                # Convert absolute exclusion path to relative path
+                # e.g., if hierarchy is "A%%B" and exclusion is "A%%B%%C", relative path is "C"
+                if exclude_path == zotero_hierarchy:
+                    logger.warning(f"Cannot exclude the root collection itself: {exclude_path}")
+                    continue
+                elif exclude_path.startswith(hierarchy_prefix):
+                    relative_path = exclude_path[len(hierarchy_prefix):]
+                    excluded_paths.add(relative_path)
+                    logger.info(f"Will exclude subcollection: {relative_path}")
+                else:
+                    logger.warning(
+                        f"Exclusion path '{exclude_path}' is not a subcollection of '{zotero_hierarchy}', ignoring"
+                    )
+
         # Resolve KB ID
         resolved_kb_id = resolve_kb_id(kb_id, kb_name, base_url, api_key)
 
@@ -1557,6 +1606,7 @@ def sync_zotero(
             kbdir_id=resolved_kbdir_id,
             base_url=base_url,
             api_key=api_key,
+            excluded_paths=excluded_paths,
             dry=dry,
             debug=debug,
         )
