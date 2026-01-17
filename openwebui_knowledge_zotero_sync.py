@@ -1119,39 +1119,12 @@ def sync_zotero_collection(
                 # Check if content is a duplicate before uploading
                 text_hash = compute_text_hash(text_content)
                 if text_hash in content_hash_map:
-                    # Content already exists - reuse the existing file instead of uploading
+                    # Content already exists under a different name
                     existing = content_hash_map[text_hash]
-                    existing_file_id = existing["file_id"]
                     logger.info(
-                        f"Reusing existing file for {filename}: content matches {existing['filename']} ({existing_file_id})"
+                        f"Skipping {filename}: content already exists as {existing['filename']}"
                     )
-
-                    # Add the existing file to knowledge base
-                    logger.info(f"Adding existing file to knowledge base: {filename}")
-                    try:
-                        add_result = add_file_to_kb(
-                            existing_file_id, kb_id, base_url, api_key
-                        )
-
-                        if not add_result.get("id"):
-                            logger.error(f"Failed to add {filename} to knowledge base")
-                            failed_files.append(
-                                (filename, "add to KB failed - no KB ID")
-                            )
-                            pbar.update(1)
-                            continue
-
-                        logger.info(
-                            f"Added existing file to KB successfully: {filename}"
-                        )
-                        added_count += 1
-                        skipped_duplicate_count += 1
-                    except requests.exceptions.HTTPError as e:
-                        logger.error(f"Failed to add {filename} to knowledge base: {e}")
-                        failed_files.append((filename, f"add to KB failed - {e}"))
-                        if debug:
-                            raise
-
+                    skipped_duplicate_count += 1
                     pbar.update(1)
                     continue
 
@@ -1487,34 +1460,12 @@ def sync_directory(
             local_hash = compute_text_hash(local_content)
 
             if local_hash in content_hash_map:
-                # Content already exists - reuse the existing file instead of uploading
+                # Content already exists under a different name
                 existing = content_hash_map[local_hash]
-                existing_file_id = existing["file_id"]
                 logger.info(
-                    f"Reusing existing file for {rel_path}: content matches {existing['filename']} ({existing_file_id})"
+                    f"Skipping {rel_path}: content already exists as {existing['filename']}"
                 )
-
-                # Add the existing file to knowledge base
-                logger.info(f"Adding existing file to knowledge base: {rel_path}")
-                try:
-                    add_result = add_file_to_kb(
-                        existing_file_id, kb_id, base_url, api_key
-                    )
-
-                    if not add_result.get("id"):
-                        logger.error(f"Failed to add {rel_path} to knowledge base")
-                        failed_files.append((rel_path, "add to KB failed - no KB ID"))
-                        continue
-
-                    logger.info(f"Added existing file to KB successfully: {rel_path}")
-                    added_count += 1
-                    skipped_duplicate_count += 1
-                except requests.exceptions.HTTPError as e:
-                    logger.error(f"Failed to add {rel_path} to knowledge base: {e}")
-                    failed_files.append((rel_path, f"add to KB failed - {e}"))
-                    if debug:
-                        raise
-
+                skipped_duplicate_count += 1
                 continue
 
         # File needs to be uploaded
