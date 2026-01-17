@@ -502,10 +502,13 @@ def get_file_content(file_id: str, base_url: str, api_key: str) -> str:
 
     # Decode to text - try UTF-8 first, fall back to latin-1 if that fails
     try:
-        return content_bytes.decode("utf-8")
+        cont = content_bytes.decode("utf-8")
     except UnicodeDecodeError:
         # logger.warning(f"Failed to decode file {file_id} as UTF-8, trying latin-1")
-        return content_bytes.decode("latin-1", errors="replace")
+        cont = content_bytes.decode("latin-1", errors="replace")
+
+    assert cont.strip(), f"Empty file content: {file_id}"
+    return cont
 
 
 def compute_text_hash(text: str) -> str:
