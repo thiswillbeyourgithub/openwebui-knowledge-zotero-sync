@@ -1061,20 +1061,31 @@ def sync_zotero_collection(
     )
     all_files = all_files_response.json()
 
-    # Build set of existing filenames for this kbdir_id
+    # Build set of existing filenames for this kbdir_id and file IDs in KB
+    # We track both to handle duplicate content properly:
+    # - existing_files: filenames decoded for this kbdir_id
+    # - kb_file_ids: all file IDs in this KB (for checking if duplicates are already present)
     existing_files = set()
+    kb_file_ids = set()
     for file_info in all_files:
-        # Only consider files in this knowledge base
-        if file_info.get("meta", {}).get("collection_name") != kb_id:
-            continue
+        # Check if file is in this knowledge base
+        is_in_kb = file_info.get("meta", {}).get("collection_name") == kb_id
 
-        encoded_name = file_info.get("meta", {}).get("name", "")
-        decoded_name = decode_filename(encoded_name, kbdir_id)
+        if is_in_kb:
+            # Track file ID for duplicate detection
+            file_id = file_info.get("id")
+            if file_id:
+                kb_file_ids.add(file_id)
 
-        if decoded_name is not None:
-            existing_files.add(decoded_name)
+            # Track filename for this kbdir_id
+            encoded_name = file_info.get("meta", {}).get("name", "")
+            decoded_name = decode_filename(encoded_name, kbdir_id)
+
+            if decoded_name is not None:
+                existing_files.add(decoded_name)
 
     logger.info(f"Found {len(existing_files)} existing files for kbdir_id '{kbdir_id}'")
+    logger.info(f"Found {len(kb_file_ids)} total files in knowledge base {kb_id}")
 
     # Step 4: Build content hash map for duplicate detection
     # This prevents uploading duplicate content under different filenames
@@ -1144,14 +1155,72 @@ def sync_zotero_collection(
                 # Check if content is a duplicate before uploading
                 text_hash = compute_text_hash(text_content)
                 if text_hash in content_hash_map:
-                    # Content already exists under a different name
+                    # Content already exists somewhere in OpenWebUI
                     existing = content_hash_map[text_hash]
+                    existing_file_id = existing["file_id"]
+                    existing_filename = existing["filename"]
+
+                    # Check if this file is already in the target KB
+                    if existing_file_id in kb_file_ids:
+                        logger.info(
+                            f"Skipping {filename}: content already in KB as {existing_filename}"
+                        )
+                        skipped_duplicate_count += 1
+                        pbar.update(1)
+                        continue
+
+                    # File exists in OpenWebUI but not in this KB - add it to the KB
+                    # This saves storage (no duplicate upload) and processing time (no re-embedding)
                     logger.info(
-                        f"Skipping {filename}: content already exists as {existing['filename']}"
+                        f"Found duplicate content: {filename} matches existing file {existing_filename}"
                     )
-                    skipped_duplicate_count += 1
-                    pbar.update(1)
-                    continue
+                    logger.info(
+                        f"Adding existing file to knowledge base instead of uploading"
+                    )
+
+                    if dry:
+                        logger.info(
+                            f"[DRY RUN] Would add existing file {existing_filename} to KB"
+                        )
+                        added_count += 1
+                        pbar.update(1)
+                        continue
+
+                    try:
+                        add_result = add_file_to_kb(
+                            existing_file_id, kb_id, base_url, api_key
+                        )
+
+                        if not add_result.get("id"):
+                            logger.error(
+                                f"Failed to add existing file {existing_filename} to KB"
+                            )
+                            failed_files.append(
+                                (filename, "add existing file to KB failed - no KB ID")
+                            )
+                            pbar.update(1)
+                            continue
+
+                        logger.info(
+                            f"Added existing file to KB successfully: {existing_filename}"
+                        )
+                        added_count += 1
+                        # Add to kb_file_ids so we don't try to add it again if another
+                        # Zotero item references the same content
+                        kb_file_ids.add(existing_file_id)
+                        pbar.update(1)
+                        continue
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to add existing file {existing_filename} to KB: {e}"
+                        )
+                        failed_files.append(
+                            (filename, f"add existing file to KB failed - {e}")
+                        )
+                        if debug:
+                            raise
+                        pbar.update(1)
+                        continue
 
                 # Upload text content as a file
                 logger.info(f"Uploading: {filename}")
