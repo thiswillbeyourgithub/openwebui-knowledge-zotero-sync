@@ -474,10 +474,10 @@ def get_file_content(file_id: str, base_url: str, api_key: str) -> str:
         api_key=api_key,
         stream=True,
     )
-    
+
     # Collect all chunks into bytes
     content_bytes = b"".join(response.iter_content(chunk_size=8192))
-    
+
     # Decode to text - try UTF-8 first, fall back to latin-1 if that fails
     try:
         return content_bytes.decode("utf-8")
@@ -533,21 +533,21 @@ def build_content_hash_map(
         If multiple files have the same hash, only the first is kept.
     """
     hash_map = {}
-    
+
     logger.info(f"Building content hash map for {len(kb_files)} files...")
-    
+
     for file_info in tqdm(kb_files, desc="Hashing KB files"):
         file_id = file_info.get("id")
         filename = file_info.get("meta", {}).get("name", "unknown")
-        
+
         if not file_id:
             continue
-            
+
         try:
             # Download file content and compute hash
             content = get_file_content(file_id, base_url, api_key)
             content_hash = compute_text_hash(content)
-            
+
             # Store first occurrence of each hash
             # If duplicates exist in KB, we keep the first one
             if content_hash not in hash_map:
@@ -560,11 +560,11 @@ def build_content_hash_map(
                 logger.debug(
                     f"Found duplicate content: {filename} matches {hash_map[content_hash]['filename']}"
                 )
-                
+
         except Exception as e:
             logger.warning(f"Failed to hash {filename}: {e}")
             continue
-    
+
     logger.info(f"Built hash map with {len(hash_map)} unique content hashes")
     return hash_map
 
@@ -1456,9 +1456,9 @@ def sync_directory(
                         local_content = f.read().decode("utf-8")
                     except UnicodeDecodeError:
                         local_content = f.read().decode("latin-1", errors="replace")
-            
+
             local_hash = compute_text_hash(local_content)
-            
+
             if local_hash in content_hash_map:
                 # Content already exists under a different name
                 existing = content_hash_map[local_hash]
