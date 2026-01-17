@@ -988,6 +988,7 @@ def sync_zotero_collection(
     base_url: str,
     api_key: str,
     excluded_paths: Optional[Set[str]] = None,
+    timeout: int = 1800,
     dry: bool = False,
     debug: bool = False,
 ) -> None:
@@ -1019,6 +1020,8 @@ def sync_zotero_collection(
         Authentication API key
     excluded_paths : Optional[Set[str]]
         Set of collection paths to exclude from syncing (relative to sync root)
+    timeout : int
+        Maximum time to wait for file processing in seconds (default: 1800)
     dry : bool
         If True, show what would be done without making changes
     debug : bool
@@ -1233,7 +1236,7 @@ def sync_zotero_collection(
                         kbdir_id=kbdir_id,
                         base_url=base_url,
                         api_key=api_key,
-                        timeout=600,
+                        timeout=timeout,
                         text_content=text_content,
                     )
 
@@ -1310,6 +1313,7 @@ def sync_directory(
     base_url: str,
     api_key: str,
     file_regex: Optional[str] = None,
+    timeout: int = 1800,
     dry: bool = False,
     debug: bool = False,
 ) -> None:
@@ -1336,6 +1340,8 @@ def sync_directory(
         Authentication API key
     file_regex : Optional[str]
         Regular expression to filter files for syncing
+    timeout : int
+        Maximum time to wait for file processing in seconds (default: 1800)
     dry : bool
         If True, show what would be done without making changes
     debug : bool
@@ -1573,7 +1579,7 @@ def sync_directory(
             abs_path = directory / rel_path
             try:
                 upload_result = upload_file(
-                    abs_path, rel_path, kbdir_id, base_url, api_key, timeout=600
+                    abs_path, rel_path, kbdir_id, base_url, api_key, timeout=timeout
                 )
 
                 if not upload_result.get("id"):
@@ -1692,6 +1698,13 @@ def cli():
     help="Dry run - show what would be done without making changes",
 )
 @click.option(
+    "--timeout",
+    envvar="OPENWEBUI_TIMEOUT",
+    default=1800,
+    type=int,
+    help="Maximum time to wait for file processing in seconds (default: 1800 = 30 minutes)",
+)
+@click.option(
     "--debug",
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
@@ -1702,7 +1715,16 @@ def cli():
     default=".",
 )
 def sync(
-    base_url, api_key, kb_id, kb_name, kbdir_id, file_regex, dry, debug, directory
+    base_url,
+    api_key,
+    kb_id,
+    kb_name,
+    kbdir_id,
+    file_regex,
+    timeout,
+    dry,
+    debug,
+    directory,
 ):
     """Synchronize DIRECTORY with OpenWebUI knowledge base.
 
@@ -1723,6 +1745,7 @@ def sync(
             base_url=base_url,
             api_key=api_key,
             file_regex=file_regex,
+            timeout=timeout,
             dry=dry,
             debug=debug,
         )
@@ -1790,6 +1813,13 @@ def sync(
     help="Unique identifier for this sync (defaults to collection name)",
 )
 @click.option(
+    "--timeout",
+    envvar="OPENWEBUI_TIMEOUT",
+    default=1800,
+    type=int,
+    help="Maximum time to wait for file processing in seconds (default: 1800 = 30 minutes)",
+)
+@click.option(
     "--dry",
     is_flag=True,
     help="Dry run - show what would be done without making changes",
@@ -1810,6 +1840,7 @@ def sync_zotero(
     kb_id,
     kb_name,
     kbdir_id,
+    timeout,
     dry,
     debug,
 ):
@@ -1912,6 +1943,7 @@ def sync_zotero(
             base_url=base_url,
             api_key=api_key,
             excluded_paths=excluded_paths,
+            timeout=timeout,
             dry=dry,
             debug=debug,
         )
