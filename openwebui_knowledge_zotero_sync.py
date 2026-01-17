@@ -504,7 +504,7 @@ def get_file_content(file_id: str, base_url: str, api_key: str) -> str:
     try:
         return content_bytes.decode("utf-8")
     except UnicodeDecodeError:
-        logger.warning(f"Failed to decode file {file_id} as UTF-8, trying latin-1")
+        # logger.warning(f"Failed to decode file {file_id} as UTF-8, trying latin-1")
         return content_bytes.decode("latin-1", errors="replace")
 
 
