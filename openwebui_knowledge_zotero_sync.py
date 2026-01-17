@@ -216,6 +216,28 @@ def make_request(
     )
 
     logger.debug(f"Response status: {response.status_code}")
+
+    # Capture and log detailed error messages before raising
+    if not response.ok:
+        error_detail = ""
+        try:
+            # Try to parse response as JSON and extract error message
+            error_json = response.json()
+            # Common error field names in APIs
+            error_detail = error_json.get(
+                "error", error_json.get("message", error_json.get("detail", ""))
+            )
+            # If error_detail is still empty or not a string, dump the whole JSON
+            if not error_detail or not isinstance(error_detail, str):
+                error_detail = json.dumps(error_json)
+        except Exception:
+            # If JSON parsing fails, get raw text response (truncated to 500 chars)
+            error_detail = (
+                response.text[:500] if response.text else "No error details available"
+            )
+
+        logger.error(f"API request failed [{response.status_code}]: {error_detail}")
+
     response.raise_for_status()
 
     return response
