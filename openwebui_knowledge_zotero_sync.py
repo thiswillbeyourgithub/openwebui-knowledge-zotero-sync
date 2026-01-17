@@ -21,6 +21,7 @@ support multiple sync directories.
 This tool was developed with assistance from aider.chat.
 """
 
+import hashlib
 import json
 import mimetypes
 import os
@@ -442,6 +443,130 @@ def remove_file_from_kb(file_id: str, kb_id: str, base_url: str, api_key: str) -
         json_data={"file_id": file_id},
     )
     return response.json()
+
+
+def get_file_content(file_id: str, base_url: str, api_key: str) -> str:
+    """Download file content from OpenWebUI by file ID.
+
+    Parameters
+    ----------
+    file_id : str
+        File ID to download
+    base_url : str
+        Base API URL
+    api_key : str
+        Authentication API key
+
+    Returns
+    -------
+    str
+        File content as text
+
+    Raises
+    ------
+    requests.exceptions.HTTPError
+        If download fails
+    """
+    response = make_request(
+        method="GET",
+        endpoint=f"/api/v1/files/{file_id}/content",
+        base_url=base_url,
+        api_key=api_key,
+        stream=True,
+    )
+    
+    # Collect all chunks into bytes
+    content_bytes = b"".join(response.iter_content(chunk_size=8192))
+    
+    # Decode to text - try UTF-8 first, fall back to latin-1 if that fails
+    try:
+        return content_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        logger.warning(f"Failed to decode file {file_id} as UTF-8, trying latin-1")
+        return content_bytes.decode("latin-1", errors="replace")
+
+
+def compute_text_hash(text: str) -> str:
+    """Compute SHA256 hash of text content for duplicate detection.
+
+    Normalizes text by stripping leading/trailing whitespace before hashing
+    to avoid false mismatches due to minor formatting differences.
+
+    Parameters
+    ----------
+    text : str
+        Text content to hash
+
+    Returns
+    -------
+    str
+        Hex-encoded SHA256 hash of the text
+    """
+    # Normalize by stripping whitespace - this prevents mismatches due to
+    # minor formatting differences while still detecting true duplicates
+    normalized = text.strip()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def build_content_hash_map(
+    kb_files: List[Dict], base_url: str, api_key: str
+) -> Dict[str, Dict]:
+    """Build mapping of content hashes to file info for duplicate detection.
+
+    Downloads content of all files in the knowledge base and computes their
+    hashes. This allows detecting if new content is a duplicate of existing
+    content, even if filenames differ.
+
+    Parameters
+    ----------
+    kb_files : List[Dict]
+        List of file metadata dicts from knowledge base
+    base_url : str
+        Base API URL
+    api_key : str
+        Authentication API key
+
+    Returns
+    -------
+    Dict[str, Dict]
+        Mapping of content_hash -> {"file_id": str, "filename": str}
+        If multiple files have the same hash, only the first is kept.
+    """
+    hash_map = {}
+    
+    logger.info(f"Building content hash map for {len(kb_files)} files...")
+    
+    for file_info in tqdm(kb_files, desc="Hashing KB files"):
+        file_id = file_info.get("id")
+        filename = file_info.get("meta", {}).get("name", "unknown")
+        
+        if not file_id:
+            continue
+            
+        try:
+            # Download file content and compute hash
+            content = get_file_content(file_id, base_url, api_key)
+            content_hash = compute_text_hash(content)
+            
+            # Store first occurrence of each hash
+            # If duplicates exist in KB, we keep the first one
+            if content_hash not in hash_map:
+                hash_map[content_hash] = {
+                    "file_id": file_id,
+                    "filename": filename,
+                }
+                logger.debug(f"Hashed {filename}: {content_hash[:16]}...")
+            else:
+                logger.debug(
+                    f"Found duplicate content: {filename} matches {hash_map[content_hash]['filename']}"
+                )
+                
+        except Exception as e:
+            logger.warning(f"Failed to hash {filename}: {e}")
+            continue
+    
+    logger.info(f"Built hash map with {len(hash_map)} unique content hashes")
+    return hash_map
 
 
 def resolve_kb_id(
@@ -926,10 +1051,18 @@ def sync_zotero_collection(
 
     logger.info(f"Found {len(existing_files)} existing files for kbdir_id '{kbdir_id}'")
 
-    # Step 4: Process each item and its attachments
+    # Step 4: Build content hash map for duplicate detection
+    # This prevents uploading duplicate content under different filenames
+    logger.info("Building content hash map for duplicate detection...")
+    content_hash_map = {}
+    if not dry:
+        content_hash_map = build_content_hash_map(all_files, base_url, api_key)
+
+    # Step 5: Process each item and its attachments
     uploaded_count = 0
     added_count = 0
     skipped_count = 0
+    skipped_duplicate_count = 0
     failed_files = []
 
     # Calculate total attachments for progress bar
@@ -980,6 +1113,18 @@ def sync_zotero_collection(
                     failed_files.append((filename, f"text extraction failed - {e}"))
                     if debug:
                         raise
+                    pbar.update(1)
+                    continue
+
+                # Check if content is a duplicate before uploading
+                text_hash = compute_text_hash(text_content)
+                if text_hash in content_hash_map:
+                    # Content already exists under a different name
+                    existing = content_hash_map[text_hash]
+                    logger.info(
+                        f"Skipping {filename}: content already exists as {existing['filename']}"
+                    )
+                    skipped_duplicate_count += 1
                     pbar.update(1)
                     continue
 
@@ -1058,7 +1203,8 @@ def sync_zotero_collection(
     else:
         logger.info(
             f"Upload summary: {uploaded_count} uploaded, {added_count} added to KB, "
-            f"{skipped_count} skipped (already in KB)"
+            f"{skipped_count} skipped (already in KB), "
+            f"{skipped_duplicate_count} skipped (duplicate content)"
         )
         logger.info("Zotero synchronization completed successfully!")
 
@@ -1254,10 +1400,18 @@ def sync_directory(
     else:
         logger.info(f"Deleted {deleted_count} files from knowledge base")
 
-    # Step 5: Upload and add new or changed files
+    # Step 5: Build content hash map for duplicate detection
+    # This prevents uploading duplicate content under different filenames
+    logger.info("Building content hash map for duplicate detection...")
+    content_hash_map = {}
+    if not dry:
+        content_hash_map = build_content_hash_map(kb_files, base_url, api_key)
+
+    # Step 6: Upload and add new or changed files
     logger.info("Checking for files to add or update...")
     uploaded_count = 0
     added_count = 0
+    skipped_duplicate_count = 0
 
     # Sort files by size (smallest first) for faster initial feedback
     # Map each file to its size and sort
@@ -1289,6 +1443,30 @@ def sync_directory(
             # Remote file is up to date or newer than local
             logger.debug(f"Skipping (up to date in KB): {rel_path}")
             continue
+
+        # Check if content is a duplicate before uploading
+        if not dry:
+            abs_path = directory / rel_path
+            with open(abs_path, "r" if abs_path.suffix == ".txt" else "rb") as f:
+                if abs_path.suffix == ".txt":
+                    local_content = f.read()
+                else:
+                    # For non-text files, read as text for hashing
+                    try:
+                        local_content = f.read().decode("utf-8")
+                    except UnicodeDecodeError:
+                        local_content = f.read().decode("latin-1", errors="replace")
+            
+            local_hash = compute_text_hash(local_content)
+            
+            if local_hash in content_hash_map:
+                # Content already exists under a different name
+                existing = content_hash_map[local_hash]
+                logger.info(
+                    f"Skipping {rel_path}: content already exists as {existing['filename']}"
+                )
+                skipped_duplicate_count += 1
+                continue
 
         # File needs to be uploaded
         if dry:
@@ -1363,7 +1541,8 @@ def sync_directory(
         logger.info("[DRY RUN] Synchronization preview completed!")
     else:
         logger.info(
-            f"Upload summary: {uploaded_count} uploaded, {added_count} added to KB"
+            f"Upload summary: {uploaded_count} uploaded, {added_count} added to KB, "
+            f"{skipped_duplicate_count} skipped (duplicate content)"
         )
         logger.info("Synchronization completed successfully!")
 
