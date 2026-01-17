@@ -1,0 +1,50 @@
+[Unit]
+# Service to sync local directory or Zotero collection to OpenWebUI knowledge base
+Description=OpenWebUI Knowledge Sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# TODO: Update the User to match your system user
+User=YOUR_USERNAME
+# TODO: Update WorkingDirectory to the directory containing openwebui_knowledge_zotero_sync.py
+WorkingDirectory=/path/to/openwebui-knowledge-zotero-sync
+
+# Environment variables for OpenWebUI connection
+# TODO: Configure these values or use EnvironmentFile instead
+Environment="OPENWEBUI_BASE_URL=http://localhost:3000"
+# IMPORTANT: Do not store API keys directly in this file!
+# Use EnvironmentFile=/path/to/secure/env-file with proper permissions (0600)
+# Example env-file content:
+#   OPENWEBUI_API_KEY=your_api_key_here
+EnvironmentFile=-/etc/openwebui-sync/credentials.env
+
+# TODO: Choose ONE of the following sync commands and uncomment it:
+
+# Option 1: Sync local directory
+# ExecStart=/usr/bin/uv run openwebui_knowledge_zotero_sync.py sync \
+#   --kb-name "My Knowledge" \
+#   --kbdir-id mydir \
+#   /path/to/directory
+
+# Option 2: Sync Zotero collection
+# Environment="ZOTERO_LIBRARY_ID=123456"
+# Environment="ZOTERO_LIBRARY_TYPE=user"
+# ExecStart=/usr/bin/uv run openwebui_knowledge_zotero_sync.py sync-zotero \
+#   --zotero-hierarchy "Research%%Machine Learning" \
+#   --kb-name "ML Papers"
+
+# Logging configuration - logs will be captured by journald
+# View with: journalctl -u openwebui-sync.service
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening - adjust as needed for your environment
+# PrivateTmp=true
+# NoNewPrivileges=true
+# ProtectSystem=strict
+# ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

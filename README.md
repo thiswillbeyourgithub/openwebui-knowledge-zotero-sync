@@ -70,6 +70,29 @@ uv run openwebui_knowledge_zotero_sync.py prune-files --dry
 
 Run any command with `--help` for more details.
 
+## Automated Sync with systemd
+
+Template systemd service and timer files are provided in the `systemd/` directory for automated daily syncs:
+
+1. **Configure the service**: Edit `systemd/openwebui-sync.service`
+   - Set `User` and `WorkingDirectory`
+   - Choose and configure either directory or Zotero sync command
+   - Create `/etc/openwebui-sync/credentials.env` with API keys (chmod 0600)
+
+2. **Adjust the schedule**: Edit `systemd/openwebui-sync.timer`
+   - Default: daily at 2:00 AM with 10-minute random delay
+   - Modify `OnCalendar` for different schedules
+
+3. **Install and enable**:
+   ```bash
+   sudo cp systemd/openwebui-sync.* /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now openwebui-sync.timer
+   sudo systemctl status openwebui-sync.timer
+   ```
+
+4. **Monitor**: View logs with `journalctl -u openwebui-sync.service`
+
 ---
 
 *This tool was developed with assistance from [aider.chat](https://github.com/Aider-AI/aider/).*
