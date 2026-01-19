@@ -1093,9 +1093,7 @@ def sync_zotero_collection(
     # Step 4: Build content hash map for duplicate detection
     # This prevents uploading duplicate content under different filenames
     logger.info("Building content hash map for duplicate detection...")
-    content_hash_map = {}
-    if not dry:
-        content_hash_map = build_content_hash_map(all_files, base_url, api_key)
+    content_hash_map = build_content_hash_map(all_files, base_url, api_key)
 
     # Step 5: Process each item and its attachments
     uploaded_count = 0
@@ -1514,9 +1512,7 @@ def sync_directory(
     # Build from ALL files in OpenWebUI, not just KB files, to detect duplicates
     # across the entire system
     logger.info("Building content hash map for duplicate detection...")
-    content_hash_map = {}
-    if not dry:
-        content_hash_map = build_content_hash_map(all_files, base_url, api_key)
+    content_hash_map = build_content_hash_map(all_files, base_url, api_key)
 
     # Step 6: Upload and add new or changed files
     logger.info("Checking for files to add or update...")
