@@ -989,6 +989,7 @@ def sync_zotero_collection(
     api_key: str,
     excluded_paths: Optional[Set[str]] = None,
     timeout: int = 1800,
+    method: str = "hash",
     dry: bool = False,
     debug: bool = False,
 ) -> None:
@@ -1022,6 +1023,8 @@ def sync_zotero_collection(
         Set of collection paths to exclude from syncing (relative to sync root)
     timeout : int
         Maximum time to wait for file processing in seconds (default: 1800)
+    method : str
+        Duplicate detection method: "hash" (check content hashes) or "name" (filename only)
     dry : bool
         If True, show what would be done without making changes
     debug : bool
@@ -1090,10 +1093,16 @@ def sync_zotero_collection(
     logger.info(f"Found {len(existing_files)} existing files for kbdir_id '{kbdir_id}'")
     logger.info(f"Found {len(kb_file_ids)} total files in knowledge base {kb_id}")
 
-    # Step 4: Build content hash map for duplicate detection
+    # Step 4: Build content hash map for duplicate detection (unless method is "name")
     # This prevents uploading duplicate content under different filenames
-    logger.info("Building content hash map for duplicate detection...")
-    content_hash_map = build_content_hash_map(all_files, base_url, api_key)
+    if method == "hash":
+        logger.info("Building content hash map for duplicate detection...")
+        content_hash_map = build_content_hash_map(all_files, base_url, api_key)
+    else:
+        logger.info(
+            "Using name-based matching (--method=name), skipping hash computation"
+        )
+        content_hash_map = {}
 
     # Step 5: Process each item and its attachments
     uploaded_count = 0
@@ -1153,9 +1162,13 @@ def sync_zotero_collection(
                     pbar.update(1)
                     continue
 
-                # Check if content is a duplicate before uploading
-                text_hash = compute_text_hash(text_content)
-                if text_hash in content_hash_map:
+                # Check if content is a duplicate before uploading (only if method is "hash")
+                if method == "hash":
+                    text_hash = compute_text_hash(text_content)
+                else:
+                    text_hash = None
+
+                if text_hash and text_hash in content_hash_map:
                     # Content already exists somewhere in OpenWebUI
                     existing = content_hash_map[text_hash]
                     existing_file_id = existing["file_id"]
@@ -1312,6 +1325,7 @@ def sync_directory(
     api_key: str,
     file_regex: Optional[str] = None,
     timeout: int = 1800,
+    method: str = "hash",
     dry: bool = False,
     debug: bool = False,
 ) -> None:
@@ -1340,6 +1354,8 @@ def sync_directory(
         Regular expression to filter files for syncing
     timeout : int
         Maximum time to wait for file processing in seconds (default: 1800)
+    method : str
+        Duplicate detection method: "hash" (check content hashes) or "name" (filename only)
     dry : bool
         If True, show what would be done without making changes
     debug : bool
@@ -1507,12 +1523,18 @@ def sync_directory(
     else:
         logger.info(f"Deleted {deleted_count} files from knowledge base")
 
-    # Step 5: Build content hash map for duplicate detection
+    # Step 5: Build content hash map for duplicate detection (unless method is "name")
     # This prevents uploading duplicate content under different filenames
     # Build from ALL files in OpenWebUI, not just KB files, to detect duplicates
     # across the entire system
-    logger.info("Building content hash map for duplicate detection...")
-    content_hash_map = build_content_hash_map(all_files, base_url, api_key)
+    if method == "hash":
+        logger.info("Building content hash map for duplicate detection...")
+        content_hash_map = build_content_hash_map(all_files, base_url, api_key)
+    else:
+        logger.info(
+            "Using name-based matching (--method=name), skipping hash computation"
+        )
+        content_hash_map = {}
 
     # Step 6: Upload and add new or changed files
     logger.info("Checking for files to add or update...")
@@ -1551,8 +1573,8 @@ def sync_directory(
             logger.debug(f"Skipping (up to date in KB): {rel_path}")
             continue
 
-        # Check if content is a duplicate before uploading
-        if not dry:
+        # Check if content is a duplicate before uploading (only if method is "hash")
+        if not dry and method == "hash":
             abs_path = directory / rel_path
             with open(abs_path, "r" if abs_path.suffix == ".txt" else "rb") as f:
                 if abs_path.suffix == ".txt":
@@ -1758,6 +1780,12 @@ def cli():
     help="Maximum time to wait for file processing in seconds (default: 1800 = 30 minutes)",
 )
 @click.option(
+    "--method",
+    type=click.Choice(["hash", "name"], case_sensitive=False),
+    default="hash",
+    help="Duplicate detection method: 'hash' checks content hashes (slower but accurate), 'name' only checks filenames (faster but may miss duplicates)",
+)
+@click.option(
     "--debug",
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
@@ -1775,6 +1803,7 @@ def sync(
     kbdir_id,
     file_regex,
     timeout,
+    method,
     dry,
     debug,
     directory,
@@ -1799,6 +1828,7 @@ def sync(
             api_key=api_key,
             file_regex=file_regex,
             timeout=timeout,
+            method=method,
             dry=dry,
             debug=debug,
         )
@@ -1873,6 +1903,12 @@ def sync(
     help="Maximum time to wait for file processing in seconds (default: 1800 = 30 minutes)",
 )
 @click.option(
+    "--method",
+    type=click.Choice(["hash", "name"], case_sensitive=False),
+    default="hash",
+    help="Duplicate detection method: 'hash' checks content hashes (slower but accurate), 'name' only checks filenames (faster but may miss duplicates)",
+)
+@click.option(
     "--dry",
     is_flag=True,
     help="Dry run - show what would be done without making changes",
@@ -1894,6 +1930,7 @@ def sync_zotero(
     kb_name,
     kbdir_id,
     timeout,
+    method,
     dry,
     debug,
 ):
@@ -1997,6 +2034,7 @@ def sync_zotero(
             api_key=api_key,
             excluded_paths=excluded_paths,
             timeout=timeout,
+            method=method,
             dry=dry,
             debug=debug,
         )
