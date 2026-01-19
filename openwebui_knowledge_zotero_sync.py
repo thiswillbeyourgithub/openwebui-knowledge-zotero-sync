@@ -1407,6 +1407,15 @@ def sync_directory(
     ]
     logger.info(f"Reconstructed {len(kb_files)} files for knowledge base {kb_id}")
 
+    # Build set of file IDs in this KB for duplicate detection
+    # This allows us to check if duplicate content is already in the target KB
+    kb_file_ids = set()
+    for file_info in kb_files:
+        file_id = file_info.get("id")
+        if file_id:
+            kb_file_ids.add(file_id)
+    logger.info(f"Tracked {len(kb_file_ids)} file IDs in knowledge base {kb_id}")
+
     # Build maps for efficient lookup
     # Map decoded filename -> updated_at timestamp for files belonging to our kbdir_id
     file_updated_at_map: Dict[str, int] = {}
@@ -1502,10 +1511,12 @@ def sync_directory(
 
     # Step 5: Build content hash map for duplicate detection
     # This prevents uploading duplicate content under different filenames
+    # Build from ALL files in OpenWebUI, not just KB files, to detect duplicates
+    # across the entire system
     logger.info("Building content hash map for duplicate detection...")
     content_hash_map = {}
     if not dry:
-        content_hash_map = build_content_hash_map(kb_files, base_url, api_key)
+        content_hash_map = build_content_hash_map(all_files, base_url, api_key)
 
     # Step 6: Upload and add new or changed files
     logger.info("Checking for files to add or update...")
@@ -1560,13 +1571,59 @@ def sync_directory(
             local_hash = compute_text_hash(local_content)
 
             if local_hash in content_hash_map:
-                # Content already exists under a different name
+                # Content already exists somewhere in OpenWebUI
                 existing = content_hash_map[local_hash]
+                existing_file_id = existing["file_id"]
+                existing_filename = existing["filename"]
+
+                # Check if this file is already in the target KB
+                if existing_file_id in kb_file_ids:
+                    logger.info(
+                        f"Skipping {rel_path}: content already in KB as {existing_filename}"
+                    )
+                    skipped_duplicate_count += 1
+                    continue
+
+                # File exists in OpenWebUI but not in this KB - add it to the KB
+                # This saves storage (no duplicate upload) and processing time (no re-embedding)
                 logger.info(
-                    f"Skipping {rel_path}: content already exists as {existing['filename']}"
+                    f"Found duplicate content: {rel_path} matches existing file {existing_filename}"
                 )
-                skipped_duplicate_count += 1
-                continue
+                logger.info(
+                    f"Adding existing file to knowledge base instead of uploading"
+                )
+
+                try:
+                    add_result = add_file_to_kb(
+                        existing_file_id, kb_id, base_url, api_key
+                    )
+
+                    if not add_result.get("id"):
+                        logger.error(
+                            f"Failed to add existing file {existing_filename} to KB"
+                        )
+                        failed_files.append(
+                            (rel_path, "add existing file to KB failed - no KB ID")
+                        )
+                        continue
+
+                    logger.info(
+                        f"Added existing file to KB successfully: {existing_filename}"
+                    )
+                    added_count += 1
+                    # Add to kb_file_ids so we don't try to add it again for another local file
+                    kb_file_ids.add(existing_file_id)
+                    continue
+                except Exception as e:
+                    logger.error(
+                        f"Failed to add existing file {existing_filename} to KB: {e}"
+                    )
+                    failed_files.append(
+                        (rel_path, f"add existing file to KB failed - {e}")
+                    )
+                    if debug:
+                        raise
+                    continue
 
         # File needs to be uploaded
         if dry:
