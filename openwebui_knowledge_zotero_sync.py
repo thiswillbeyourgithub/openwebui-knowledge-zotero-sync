@@ -956,7 +956,7 @@ def generate_zotero_filename(
     """
     # Sanitize title - remove HTML tags and replace path separators with underscores
     # Strip HTML tags like <span>, <em>, etc. that Zotero includes in titles
-    sanitized_title = re.sub(r'<[^>]+>', '', title)
+    sanitized_title = re.sub(r"<[^>]+>", "", title)
     # Replace path separators with underscores
     sanitized_title = sanitized_title.replace("/", "_").replace("\\", "_")
 
