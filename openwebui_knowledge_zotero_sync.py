@@ -928,17 +928,19 @@ def get_attachment_text(zot: zotero.Zotero, attachment_key: str) -> str:
 
 
 def generate_zotero_filename(
-    title: str, paths: List[str], attachment_index: int
+    title: str, paths: List[str], attachment_index: int, max_length: int = 200
 ) -> str:
     """Generate encoded filename for Zotero item with attachment.
 
     Creates a filename that encodes the item's location in the collection
     hierarchy and handles items that appear in multiple subcollections.
+    Long filenames are automatically truncated to avoid filesystem limits.
 
     Filename format:
     - Root collection only: {title}.txt or {title}_2.txt for additional attachments
     - Single subcollection: {path}%%{title}.txt
     - Multiple subcollections: {path1}&&{path2}%%{title}.txt
+    - If truncated: {path}%%{truncated_title}...{suffix}.txt
 
     Parameters
     ----------
@@ -948,11 +950,13 @@ def generate_zotero_filename(
         List of collection paths where this item appears
     attachment_index : int
         Index of attachment (0 for first, 1 for second, etc.)
+    max_length : int
+        Maximum filename length to avoid filesystem limits (default: 200)
 
     Returns
     -------
     str
-        Generated filename with .txt extension
+        Generated filename with .txt extension, truncated if necessary
     """
     # Sanitize title - remove HTML tags and replace path separators with underscores
     # Strip HTML tags like <span>, <em>, etc. that Zotero includes in titles
@@ -979,7 +983,31 @@ def generate_zotero_filename(
     else:
         suffix = ""
 
-    return f"{path_prefix}{sanitized_title}{suffix}.txt"
+    # Extension is always .txt
+    extension = ".txt"
+
+    # Build initial filename
+    filename = f"{path_prefix}{sanitized_title}{suffix}{extension}"
+
+    # Check if truncation is needed
+    if len(filename) > max_length:
+        # Calculate space available for title
+        # We need: path_prefix + title_with_marker + suffix + extension <= max_length
+        # Where: title_with_marker = truncated_title + "..."
+        truncation_marker = "..."
+        fixed_overhead = len(path_prefix) + len(suffix) + len(extension)
+        max_title_with_marker = max_length - fixed_overhead
+        max_truncated_title = max_title_with_marker - len(truncation_marker)
+
+        # Ensure minimum title length to keep filenames meaningful
+        if max_truncated_title < 10:
+            max_truncated_title = 10
+
+        # Truncate title and rebuild filename
+        truncated_title = sanitized_title[:max_truncated_title] + truncation_marker
+        filename = f"{path_prefix}{truncated_title}{suffix}{extension}"
+
+    return filename
 
 
 def sync_zotero_collection(
