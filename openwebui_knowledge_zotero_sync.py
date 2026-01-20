@@ -954,8 +954,11 @@ def generate_zotero_filename(
     str
         Generated filename with .txt extension
     """
-    # Sanitize title - replace path separators with underscores
-    sanitized_title = title.replace("/", "_").replace("\\", "_")
+    # Sanitize title - remove HTML tags and replace path separators with underscores
+    # Strip HTML tags like <span>, <em>, etc. that Zotero includes in titles
+    sanitized_title = re.sub(r'<[^>]+>', '', title)
+    # Replace path separators with underscores
+    sanitized_title = sanitized_title.replace("/", "_").replace("\\", "_")
 
     # Build path prefix based on number of paths
     if not paths or (len(paths) == 1 and paths[0] == ""):
