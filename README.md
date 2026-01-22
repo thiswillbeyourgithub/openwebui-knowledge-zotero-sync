@@ -10,6 +10,7 @@ This tool is under active development. There are many situations and file types 
 
 - **Sync local directories** to OpenWebUI knowledge bases with timestamp-based change detection
 - **Sync Zotero collections** by extracting text from PDF attachments and preserving collection hierarchy
+  - **Note**: This tool is read-only with respect to Zotero - it will never modify, delete, or add anything to your Zotero collections or libraries
 - **List knowledge bases** with simplified or full output
 - **List all files** in OpenWebUI with optional content truncation
 - **Check file processing status** to find failed uploads
