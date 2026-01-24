@@ -160,6 +160,20 @@ Run any command with `--help` for more details.
   - Faster but may upload duplicate content under different names
   - Useful when you're confident filenames are unique
 
+## Troubleshooting
+
+### Zotero "text extraction failed" Errors
+
+If Zotero sync fails with "text extraction failed" errors, it means some PDF files have not been indexed by Zotero. To fix this:
+
+1. Open Zotero's Settings (Preferences)
+2. Go to the **Advanced** tab
+3. Click **"Rebuild Index..."** button
+4. Wait for the indexing process to complete
+5. Re-run the sync command
+
+This rebuilds Zotero's fulltext index, making Zotero aware of the text content in your PDF files. Without this index, the tool cannot extract text from the attachments.
+
 ## Automated Sync with systemd
 
 Template systemd service and timer files are provided in the `systemd/` directory for automated daily syncs:
