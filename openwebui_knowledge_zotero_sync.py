@@ -42,7 +42,7 @@ from tqdm import tqdm
 
 from utils.datatypes import File, KnowledgeBase, validate_response
 
-VERSION: str = "1.2.0"
+VERSION: str = "2.0.0"
 
 # Configure logger to write to both console and file
 # Detailed logs go to file, INFO+ goes to console
