@@ -516,7 +516,7 @@ def remove_file_from_kb(
     """
     # Build endpoint with query parameter to control file deletion
     endpoint = f"/api/v1/knowledge/{kb_id}/file/remove?delete_file={'true' if delete_file else 'false'}"
-    
+
     response = make_request(
         method="POST",
         endpoint=endpoint,
@@ -1211,7 +1211,7 @@ def sync_zotero_collection(
         title = item_data["title"]
         paths = item_data["paths"]
         attachments = item_data["attachments"]
-        
+
         for idx in range(len(attachments)):
             filename = generate_zotero_filename(title, paths, idx)
             expected_filenames.add(filename)
@@ -1226,7 +1226,7 @@ def sync_zotero_collection(
         file_id = file_info.get("id")
         if not file_id:
             continue
-        
+
         encoded_name = file_info.get("meta", {}).get("name", "")
         # Try to extract kbdir_id by splitting on first %%
         if "%%" in encoded_name:
@@ -1246,32 +1246,32 @@ def sync_zotero_collection(
             kb_file = kb_file_data.model_dump()
         else:
             kb_file = kb_file_data
-        
+
         encoded_name = kb_file.get("meta", {}).get("name", "")
         decoded_name = decode_filename(encoded_name, kbdir_id)
-        
+
         if decoded_name is None:
             # Not from our sync directory, skip
             continue
-        
+
         # Check if this file is still expected in the collection
         if decoded_name in expected_filenames:
             # File is still in Zotero collection, keep it
             continue
-        
+
         # File is no longer in Zotero collection - remove it
         file_id = kb_file.get("id")
-        
+
         if not file_id:
             logger.warning(f"Cannot remove file without ID: {decoded_name}")
             continue
-        
+
         # Determine if file is used by other kbdir_ids
         kbdirs_using_file = file_id_to_kbdirs.get(file_id, set())
         is_shared = len(kbdirs_using_file) > 1 or (
             len(kbdirs_using_file) == 1 and kbdir_id not in kbdirs_using_file
         )
-        
+
         if is_shared:
             # File is used by other sync directories - just remove from current KB
             if dry:
