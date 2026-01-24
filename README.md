@@ -8,9 +8,21 @@ This tool is under active development. There are many situations and file types 
 
 ## What it can do
 
-- **Sync local directories** to OpenWebUI knowledge bases with timestamp-based change detection
-- **Sync Zotero collections** by extracting text from PDF attachments and preserving collection hierarchy
+- **Sync local directories** to OpenWebUI knowledge bases
+  - Timestamp-based change detection (compares local mtime with remote updated_at)
+  - Automatic cleanup: removes files from KB that no longer exist locally or are outdated
+  - Two-phase sync: delete outdated files first, then upload new/changed files
+- **Sync Zotero collections** by extracting text from PDF attachments
+  - Preserves collection hierarchy in filenames
+  - Handles items in multiple subcollections
+  - Automatic cleanup: removes files no longer in Zotero collection
+  - Smart deletion: files shared across sync directories are removed from KB only, not deleted
   - **Note**: This tool is read-only with respect to Zotero - it will never modify, delete, or add anything to your Zotero collections or libraries
+- **Intelligent duplicate detection**
+  - Hash-based: compares content hashes to detect true duplicates (default)
+  - Name-based: faster but only checks filenames
+  - Automatic file reuse: if duplicate content already exists in OpenWebUI, adds existing file to KB instead of re-uploading
+  - Saves storage space and processing time
 - **List knowledge bases** with simplified or full output
 - **List all files** in OpenWebUI with optional content truncation
 - **Check file processing status** to find failed uploads
@@ -31,19 +43,49 @@ Configure via command-line options or environment variables:
 - `OPENWEBUI_API_KEY` - Authentication key (required)
 - `OPENWEBUI_KB_ID` or `OPENWEBUI_KB_NAME` - Knowledge base to sync with
 - `OPENWEBUI_KBDIR_ID` - Unique identifier for sync directory
+- `OPENWEBUI_TIMEOUT` - Max seconds to wait for file processing (default: 1800)
 
 **Zotero Settings** (`ZOTERO_*` prefix):
 - `ZOTERO_LIBRARY_ID` - Zotero library ID (required for Zotero sync)
 - `ZOTERO_LIBRARY_TYPE` - Library type: 'user' or 'group' (default: user)
 - `ZOTERO_API_KEY` - Zotero API authentication key (required for Zotero sync)
 
+**Sync Options**:
+- `--method` - Duplicate detection: 'hash' (content-based, slower) or 'name' (filename-based, faster)
+- `--dry` - Preview changes without applying them
+- `--debug` - Enable debug mode with pdb debugger on exceptions
+
 ## Usage
 
 **Recommended**: Use `uv run` to execute the script - it will automatically handle all dependencies via the PEP 723 inline header.
 
 ```bash
-# Sync a directory to a knowledge base
-uv run openwebui_knowledge_zotero_sync.py sync --kb-name "My Knowledge" --kbdir-id mydir /path/to/dir
+# Sync a directory with hash-based duplicate detection (default)
+uv run openwebui_knowledge_zotero_sync.py sync \
+  --kb-name "My Knowledge" \
+  --kbdir-id mydir \
+  /path/to/dir
+
+# Sync with name-based duplicate detection (faster)
+uv run openwebui_knowledge_zotero_sync.py sync \
+  --kb-name "My Knowledge" \
+  --kbdir-id mydir \
+  --method name \
+  /path/to/dir
+
+# Sync only markdown files using regex filter
+uv run openwebui_knowledge_zotero_sync.py sync \
+  --kb-name "My Knowledge" \
+  --kbdir-id mydir \
+  --file-regex '.*\.md$' \
+  /path/to/dir
+
+# Preview what would be synced without making changes
+uv run openwebui_knowledge_zotero_sync.py sync \
+  --kb-name "My Knowledge" \
+  --kbdir-id mydir \
+  --dry \
+  /path/to/dir
 
 # Sync a Zotero collection (extracts text from PDFs)
 uv run openwebui_knowledge_zotero_sync.py sync-zotero \
@@ -59,17 +101,64 @@ uv run openwebui_knowledge_zotero_sync.py sync-zotero \
   --zotero-exclude "Research%%Drafts" \
   --kb-name "Active Research"
 
+# Sync Zotero with dry-run to preview changes
+uv run openwebui_knowledge_zotero_sync.py sync-zotero \
+  --zotero-hierarchy "Research" \
+  --kb-name "ML Papers" \
+  --dry
+
 # List knowledge bases
 uv run openwebui_knowledge_zotero_sync.py list-kb
+
+# List files in a specific knowledge base
+uv run openwebui_knowledge_zotero_sync.py list-kb-files --kb-name "My Knowledge"
 
 # Check file processing status
 uv run openwebui_knowledge_zotero_sync.py files-status
 
-# Clean up failed uploads
+# Clean up failed uploads (preview first)
 uv run openwebui_knowledge_zotero_sync.py prune-files --dry
+
+# Actually delete failed files
+uv run openwebui_knowledge_zotero_sync.py prune-files
+
+# Download a specific file's content
+uv run openwebui_knowledge_zotero_sync.py download-file abc123 > output.txt
 ```
 
 Run any command with `--help` for more details.
+
+## How Sync Works
+
+### Directory Sync
+1. **Delete Phase**: Removes files from KB that:
+   - No longer exist locally
+   - Have been modified locally (local mtime > remote updated_at)
+2. **Upload Phase**: 
+   - Checks for duplicate content using hash comparison (if `--method hash`)
+   - Reuses existing files if content already exists in OpenWebUI
+   - Uploads new/changed files and adds them to the KB
+   - Waits for OpenWebUI to finish processing each file before continuing
+
+### Zotero Sync
+1. **Cleanup Phase**: Removes files from KB that are no longer in the Zotero collection
+   - If file is shared with other sync directories: removes from current KB only
+   - If file is unique to this sync: deletes from KB and storage
+2. **Upload Phase**:
+   - Extracts text from PDF attachments
+   - Checks for duplicate content (if `--method hash`)
+   - Reuses existing files if content already exists
+   - Uploads new content with hierarchy-preserving filenames
+   - Waits for processing to complete
+
+### Duplicate Detection Methods
+- **`--method hash`** (default): Downloads all file content and compares SHA256 hashes
+  - Slower but prevents duplicate content even if filenames differ
+  - Automatically reuses existing files when duplicate content is found
+  - Saves storage space and processing time
+- **`--method name`**: Only checks filenames
+  - Faster but may upload duplicate content under different names
+  - Useful when you're confident filenames are unique
 
 ## Automated Sync with systemd
 
@@ -79,6 +168,7 @@ Template systemd service and timer files are provided in the `systemd/` director
    - Set `User` and `WorkingDirectory`
    - Choose and configure either directory or Zotero sync command
    - Create `/etc/openwebui-sync/credentials.env` with API keys (chmod 0600)
+   - Consider using `--method name` for faster automated syncs if duplicate detection isn't critical
 
 2. **Adjust the schedule**: Edit `systemd/openwebui-sync.timer`
    - Default: daily at 2:00 AM with 10-minute random delay
