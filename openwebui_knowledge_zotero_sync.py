@@ -397,6 +397,61 @@ def upload_file(
                 logger.warning(f"Failed to delete temporary file: {e}")
 
 
+def create_knowledge_base(
+    name: str,
+    description: str,
+    base_url: str,
+    api_key: str,
+) -> str:
+    """Create a new knowledge base.
+
+    Parameters
+    ----------
+    name : str
+        Knowledge base name
+    description : str
+        Knowledge base description
+    base_url : str
+        Base API URL
+    api_key : str
+        Authentication API key
+
+    Returns
+    -------
+    str
+        Created knowledge base ID
+
+    Raises
+    ------
+    requests.exceptions.HTTPError
+        If creation fails
+    click.ClickException
+        If response doesn't contain a knowledge base ID
+    """
+    logger.info(f"Creating new knowledge base: {name}")
+    response = make_request(
+        method="POST",
+        endpoint="/api/v1/knowledge/create",
+        base_url=base_url,
+        api_key=api_key,
+        json_data={
+            "name": name,
+            "description": description,
+            "access_control": None,
+        },
+    )
+    kb_data = response.json()
+    kb_id = kb_data.get("id")
+
+    if not kb_id:
+        raise click.ClickException(
+            f"Failed to create knowledge base '{name}': No ID in response"
+        )
+
+    logger.info(f"Created knowledge base '{name}' with ID: {kb_id}")
+    return kb_id
+
+
 def add_file_to_kb(file_id: str, kb_id: str, base_url: str, api_key: str) -> Dict:
     """Add an uploaded file to a knowledge base.
 
@@ -600,7 +655,8 @@ def resolve_kb_id(
     """Resolve knowledge base name to ID, or return ID if provided.
 
     Exactly one of kb_id or kb_name must be provided. If kb_name is given,
-    it will be looked up via the API to find the corresponding ID.
+    it will be looked up via the API to find the corresponding ID. If the
+    name doesn't exist, a new knowledge base will be created automatically.
 
     Parameters
     ----------
@@ -616,13 +672,12 @@ def resolve_kb_id(
     Returns
     -------
     str
-        Knowledge base ID
+        Knowledge base ID (existing or newly created)
 
     Raises
     ------
     click.ClickException
-        If neither kb_id nor kb_name is provided, both are provided,
-        or if kb_name doesn't match any knowledge base
+        If neither kb_id nor kb_name is provided, or both are provided
     """
     if kb_id and kb_name:
         raise click.ClickException(
@@ -654,10 +709,13 @@ def resolve_kb_id(
             logger.info(f"Resolved knowledge base '{kb_name}' to ID: {resolved_id}")
             return resolved_id
 
-    # No match found
-    available_names = [kb.get("name") for kb in kb_list if kb.get("name")]
-    raise click.ClickException(
-        f"Knowledge base '{kb_name}' not found. Available: {', '.join(available_names)}"
+    # No match found - create new knowledge base
+    logger.info(f"Knowledge base '{kb_name}' not found, creating it...")
+    return create_knowledge_base(
+        name=kb_name,
+        description=f"Auto-created knowledge base for {kb_name}",
+        base_url=base_url,
+        api_key=api_key,
     )
 
 
