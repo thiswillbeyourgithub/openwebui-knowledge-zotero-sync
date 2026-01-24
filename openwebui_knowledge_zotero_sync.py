@@ -486,10 +486,10 @@ def add_file_to_kb(file_id: str, kb_id: str, base_url: str, api_key: str) -> Dic
     return response.json()
 
 
-def remove_file_from_kb(file_id: str, kb_id: str, base_url: str, api_key: str) -> Dict:
+def remove_file_from_kb(
+    file_id: str, kb_id: str, base_url: str, api_key: str, delete_file: bool = True
+) -> Dict:
     """Remove a file from a knowledge base.
-
-    This also deletes the file from storage automatically per OpenWebUI behavior.
 
     Parameters
     ----------
@@ -501,6 +501,8 @@ def remove_file_from_kb(file_id: str, kb_id: str, base_url: str, api_key: str) -
         Base API URL
     api_key : str
         Authentication API key
+    delete_file : bool
+        If True, delete the file from storage. If False, only remove from KB.
 
     Returns
     -------
@@ -512,9 +514,12 @@ def remove_file_from_kb(file_id: str, kb_id: str, base_url: str, api_key: str) -
     requests.exceptions.HTTPError
         If remove operation fails
     """
+    # Build endpoint with query parameter to control file deletion
+    endpoint = f"/api/v1/knowledge/{kb_id}/file/remove?delete_file={'true' if delete_file else 'false'}"
+    
     response = make_request(
         method="POST",
-        endpoint=f"/api/v1/knowledge/{kb_id}/file/remove",
+        endpoint=endpoint,
         base_url=base_url,
         api_key=api_key,
         json_data={"file_id": file_id},
@@ -1162,6 +1167,7 @@ def sync_zotero_collection(
     # - kb_file_ids: all file IDs in this KB (for checking if duplicates are already present)
     existing_files = set()
     kb_file_ids = set()
+    kb_files = []
     for file_info in all_files:
         # Check if file is in this knowledge base
         is_in_kb = file_info.get("meta", {}).get("collection_name") == kb_id
@@ -1171,6 +1177,8 @@ def sync_zotero_collection(
             file_id = file_info.get("id")
             if file_id:
                 kb_file_ids.add(file_id)
+            # Track file for cleanup logic
+            kb_files.append(file_info)
 
         # Track filename for this kbdir_id (check all files, not just those in this KB)
         # This prevents re-uploading files that were uploaded but failed to be added to KB
@@ -1194,12 +1202,133 @@ def sync_zotero_collection(
         )
         content_hash_map = {}
 
+    # Step 4.5: Clean up files no longer in Zotero collection
+    logger.info("Checking for files to remove from knowledge base...")
+
+    # Build set of expected filenames based on Zotero items
+    expected_filenames = set()
+    for item_key, item_data in items_dict.items():
+        title = item_data["title"]
+        paths = item_data["paths"]
+        attachments = item_data["attachments"]
+        
+        for idx in range(len(attachments)):
+            filename = generate_zotero_filename(title, paths, idx)
+            expected_filenames.add(filename)
+
+    logger.info(f"Expecting {len(expected_filenames)} files based on Zotero collection")
+
+    # Build map of file_id -> set of kbdir_ids that use it
+    # This determines if a file is shared across sync directories
+    file_id_to_kbdirs: Dict[str, Set[str]] = {}
+
+    for file_info in all_files:
+        file_id = file_info.get("id")
+        if not file_id:
+            continue
+        
+        encoded_name = file_info.get("meta", {}).get("name", "")
+        # Try to extract kbdir_id by splitting on first %%
+        if "%%" in encoded_name:
+            extracted_kbdir = encoded_name.split("%%")[0]
+            if file_id not in file_id_to_kbdirs:
+                file_id_to_kbdirs[file_id] = set()
+            file_id_to_kbdirs[file_id].add(extracted_kbdir)
+
+    # Check each file in KB for removal
+    removed_count = 0
+    deleted_count = 0
+    failed_files = []
+
+    for kb_file_data in kb_files:
+        # Handle both validated File objects and raw dicts
+        if isinstance(kb_file_data, File):
+            kb_file = kb_file_data.model_dump()
+        else:
+            kb_file = kb_file_data
+        
+        encoded_name = kb_file.get("meta", {}).get("name", "")
+        decoded_name = decode_filename(encoded_name, kbdir_id)
+        
+        if decoded_name is None:
+            # Not from our sync directory, skip
+            continue
+        
+        # Check if this file is still expected in the collection
+        if decoded_name in expected_filenames:
+            # File is still in Zotero collection, keep it
+            continue
+        
+        # File is no longer in Zotero collection - remove it
+        file_id = kb_file.get("id")
+        
+        if not file_id:
+            logger.warning(f"Cannot remove file without ID: {decoded_name}")
+            continue
+        
+        # Determine if file is used by other kbdir_ids
+        kbdirs_using_file = file_id_to_kbdirs.get(file_id, set())
+        is_shared = len(kbdirs_using_file) > 1 or (
+            len(kbdirs_using_file) == 1 and kbdir_id not in kbdirs_using_file
+        )
+        
+        if is_shared:
+            # File is used by other sync directories - just remove from current KB
+            if dry:
+                logger.info(
+                    f"[DRY RUN] Would remove from KB (shared with other dirs): {decoded_name}"
+                )
+                removed_count += 1
+            else:
+                logger.info(
+                    f"Removing from KB (shared with other dirs): {decoded_name}"
+                )
+                try:
+                    remove_file_from_kb(
+                        file_id, kb_id, base_url, api_key, delete_file=False
+                    )
+                    removed_count += 1
+                    logger.info(f"Removed from KB (file preserved): {decoded_name}")
+                except Exception as e:
+                    logger.error(f"Failed to remove {decoded_name} from KB: {e}")
+                    failed_files.append((decoded_name, f"remove from KB failed - {e}"))
+                    if debug:
+                        raise
+        else:
+            # File is only used by this sync directory - delete entirely
+            if dry:
+                logger.info(
+                    f"[DRY RUN] Would delete entirely (not in other dirs): {decoded_name}"
+                )
+                deleted_count += 1
+            else:
+                logger.info(f"Deleting entirely (not in other dirs): {decoded_name}")
+                try:
+                    remove_file_from_kb(
+                        file_id, kb_id, base_url, api_key, delete_file=True
+                    )
+                    deleted_count += 1
+                    logger.info(f"Deleted from KB and storage: {decoded_name}")
+                except Exception as e:
+                    logger.error(f"Failed to delete {decoded_name}: {e}")
+                    failed_files.append((decoded_name, f"delete failed - {e}"))
+                    if debug:
+                        raise
+
+    if dry:
+        logger.info(
+            f"[DRY RUN] Would remove {removed_count} files from KB, delete {deleted_count} files entirely"
+        )
+    else:
+        logger.info(
+            f"Cleanup: {removed_count} removed from KB, {deleted_count} deleted entirely"
+        )
+
     # Step 5: Process each item and its attachments
     uploaded_count = 0
     added_count = 0
     skipped_count = 0
     skipped_duplicate_count = 0
-    failed_files = []
 
     # Calculate total attachments for progress bar
     total_attachments = sum(len(item["attachments"]) for item in items_dict.values())
@@ -1395,7 +1524,8 @@ def sync_zotero_collection(
     if dry:
         logger.info(
             f"[DRY RUN] Summary: {uploaded_count} would be uploaded, "
-            f"{added_count} would be added to KB, {skipped_count} already in KB"
+            f"{added_count} would be added to KB, {skipped_count} already in KB, "
+            f"{removed_count} would be removed from KB, {deleted_count} would be deleted"
         )
         logger.info("[DRY RUN] Zotero synchronization preview completed!")
     else:
@@ -1403,6 +1533,9 @@ def sync_zotero_collection(
             f"Upload summary: {uploaded_count} uploaded, {added_count} added to KB, "
             f"{skipped_count} skipped (already in KB), "
             f"{skipped_duplicate_count} skipped (duplicate content)"
+        )
+        logger.info(
+            f"Cleanup summary: {removed_count} removed from KB, {deleted_count} deleted entirely"
         )
         logger.info("Zotero synchronization completed successfully!")
 
