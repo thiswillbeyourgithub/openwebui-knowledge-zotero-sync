@@ -1100,7 +1100,7 @@ def sync_zotero_collection(
 
     # Build set of existing filenames for this kbdir_id and file IDs in KB
     # We track both to handle duplicate content properly:
-    # - existing_files: filenames decoded for this kbdir_id
+    # - existing_files: filenames decoded for this kbdir_id (across ALL files)
     # - kb_file_ids: all file IDs in this KB (for checking if duplicates are already present)
     existing_files = set()
     kb_file_ids = set()
@@ -1114,12 +1114,13 @@ def sync_zotero_collection(
             if file_id:
                 kb_file_ids.add(file_id)
 
-            # Track filename for this kbdir_id
-            encoded_name = file_info.get("meta", {}).get("name", "")
-            decoded_name = decode_filename(encoded_name, kbdir_id)
+        # Track filename for this kbdir_id (check all files, not just those in this KB)
+        # This prevents re-uploading files that were uploaded but failed to be added to KB
+        encoded_name = file_info.get("meta", {}).get("name", "")
+        decoded_name = decode_filename(encoded_name, kbdir_id)
 
-            if decoded_name is not None:
-                existing_files.add(decoded_name)
+        if decoded_name is not None:
+            existing_files.add(decoded_name)
 
     logger.info(f"Found {len(existing_files)} existing files for kbdir_id '{kbdir_id}'")
     logger.info(f"Found {len(kb_file_ids)} total files in knowledge base {kb_id}")
