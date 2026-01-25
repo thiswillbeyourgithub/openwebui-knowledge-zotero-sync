@@ -355,9 +355,7 @@ def upload_file(
                         error_text = str(
                             error_json.get(
                                 "error",
-                                error_json.get(
-                                    "message", error_json.get("detail", "")
-                                ),
+                                error_json.get("message", error_json.get("detail", "")),
                             )
                         )
                     except:
@@ -386,7 +384,9 @@ def upload_file(
                                 with open(
                                     filepath,
                                     "r" if filepath.suffix == ".txt" else "rb",
-                                    encoding="utf-8" if filepath.suffix == ".txt" else None,
+                                    encoding="utf-8"
+                                    if filepath.suffix == ".txt"
+                                    else None,
                                 ) as f:
                                     if filepath.suffix == ".txt":
                                         content_to_modify = f.read()
@@ -396,7 +396,9 @@ def upload_file(
                                         except (UnicodeDecodeError, AttributeError):
                                             raw_bytes = f.read()
                                             content_to_modify = (
-                                                raw_bytes.decode("latin-1", errors="replace")
+                                                raw_bytes.decode(
+                                                    "latin-1", errors="replace"
+                                                )
                                                 if isinstance(raw_bytes, bytes)
                                                 else ""
                                             )
@@ -405,7 +407,9 @@ def upload_file(
                             md5_hash = hashlib.md5(
                                 content_to_modify.encode("utf-8")
                             ).hexdigest()
-                            text_content = f"{content_to_modify}\n\n<!-- MD5: {md5_hash} -->"
+                            text_content = (
+                                f"{content_to_modify}\n\n<!-- MD5: {md5_hash} -->"
+                            )
 
                             # Continue to next loop iteration (retry with modified content)
                             continue
