@@ -1714,9 +1714,13 @@ def sync_zotero_collection(
                                 break  # Exit retry loop
 
                             file_id = upload_result["id"]
-                            logger.info(f"Re-uploaded successfully: {filename} ({file_id})")
+                            logger.info(
+                                f"Re-uploaded successfully: {filename} ({file_id})"
+                            )
                         except Exception as upload_error:
-                            logger.error(f"Re-upload failed for {filename}: {upload_error}")
+                            logger.error(
+                                f"Re-upload failed for {filename}: {upload_error}"
+                            )
                             failed_files.append(
                                 (filename, f"re-upload failed - {upload_error}")
                             )
@@ -1730,7 +1734,9 @@ def sync_zotero_collection(
 
                         if not add_result.get("id"):
                             logger.error(f"Failed to add {filename} to knowledge base")
-                            failed_files.append((filename, "add to KB failed - no KB ID"))
+                            failed_files.append(
+                                (filename, "add to KB failed - no KB ID")
+                            )
                             break  # Exit retry loop
 
                         logger.info(f"Added to KB successfully: {filename}")
@@ -1751,7 +1757,9 @@ def sync_zotero_collection(
                             if not error_text:
                                 error_text = json.dumps(error_json)
                         except Exception:
-                            error_text = e.response.text[:500] if e.response.text else ""
+                            error_text = (
+                                e.response.text[:500] if e.response.text else ""
+                            )
 
                         # Check if this is a duplicate content error at add-to-KB stage
                         if (
@@ -1790,7 +1798,9 @@ def sync_zotero_collection(
                                 break  # Exit retry loop
                         else:
                             # Not a duplicate error - fail immediately
-                            logger.error(f"Failed to add {filename} to knowledge base: {e}")
+                            logger.error(
+                                f"Failed to add {filename} to knowledge base: {e}"
+                            )
                             failed_files.append((filename, f"add to KB failed - {e}"))
                             if debug:
                                 raise
@@ -2265,7 +2275,9 @@ def sync_directory(
 
                 except Exception as upload_error:
                     logger.error(f"Re-upload failed for {rel_path}: {upload_error}")
-                    failed_files.append((rel_path, f"re-upload failed - {upload_error}"))
+                    failed_files.append(
+                        (rel_path, f"re-upload failed - {upload_error}")
+                    )
                     if debug:
                         raise
                     break  # Exit retry loop
@@ -2311,9 +2323,7 @@ def sync_directory(
                     and "duplicate content" in error_text.lower()
                 ):
                     if not force_duplicate:
-                        logger.error(
-                            f"Failed to add {rel_path} to knowledge base: {e}"
-                        )
+                        logger.error(f"Failed to add {rel_path} to knowledge base: {e}")
                         failed_files.append(
                             (
                                 rel_path,
