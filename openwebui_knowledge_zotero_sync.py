@@ -2020,7 +2020,7 @@ def cli():
 @click.option(
     "--method",
     type=click.Choice(["hash", "name"], case_sensitive=False),
-    default="hash",
+    default="name",
     help="Duplicate detection method: 'hash' checks content hashes (slower but accurate), 'name' only checks filenames (faster but may miss duplicates)",
 )
 @click.option(
@@ -2143,7 +2143,7 @@ def sync(
 @click.option(
     "--method",
     type=click.Choice(["hash", "name"], case_sensitive=False),
-    default="hash",
+    default="name",
     help="Duplicate detection method: 'hash' checks content hashes (slower but accurate), 'name' only checks filenames (faster but may miss duplicates)",
 )
 @click.option(
