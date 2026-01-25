@@ -1186,7 +1186,7 @@ def sync_zotero_collection(
         encoded_name = file_info.get("meta", {}).get("name", "")
         prefix = f"{kbdir_id}%%"
         if encoded_name.startswith(prefix):
-            filename_without_prefix = encoded_name[len(prefix):]
+            filename_without_prefix = encoded_name[len(prefix) :]
             existing_files.add(filename_without_prefix)
 
     logger.info(f"Found {len(existing_files)} existing files for kbdir_id '{kbdir_id}'")
@@ -1255,7 +1255,7 @@ def sync_zotero_collection(
             # Not from our sync directory, skip
             continue
 
-        filename_without_prefix = encoded_name[len(prefix):]
+        filename_without_prefix = encoded_name[len(prefix) :]
 
         # Check if this file is still expected in the collection
         if filename_without_prefix in expected_filenames:
@@ -1291,10 +1291,16 @@ def sync_zotero_collection(
                         file_id, kb_id, base_url, api_key, delete_file=False
                     )
                     removed_count += 1
-                    logger.info(f"Removed from KB (file preserved): {filename_without_prefix}")
+                    logger.info(
+                        f"Removed from KB (file preserved): {filename_without_prefix}"
+                    )
                 except Exception as e:
-                    logger.error(f"Failed to remove {filename_without_prefix} from KB: {e}")
-                    failed_files.append((filename_without_prefix, f"remove from KB failed - {e}"))
+                    logger.error(
+                        f"Failed to remove {filename_without_prefix} from KB: {e}"
+                    )
+                    failed_files.append(
+                        (filename_without_prefix, f"remove from KB failed - {e}")
+                    )
                     if debug:
                         raise
         else:
@@ -1305,16 +1311,22 @@ def sync_zotero_collection(
                 )
                 deleted_count += 1
             else:
-                logger.info(f"Deleting entirely (not in other dirs): {filename_without_prefix}")
+                logger.info(
+                    f"Deleting entirely (not in other dirs): {filename_without_prefix}"
+                )
                 try:
                     remove_file_from_kb(
                         file_id, kb_id, base_url, api_key, delete_file=True
                     )
                     deleted_count += 1
-                    logger.info(f"Deleted from KB and storage: {filename_without_prefix}")
+                    logger.info(
+                        f"Deleted from KB and storage: {filename_without_prefix}"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to delete {filename_without_prefix}: {e}")
-                    failed_files.append((filename_without_prefix, f"delete failed - {e}"))
+                    failed_files.append(
+                        (filename_without_prefix, f"delete failed - {e}")
+                    )
                     if debug:
                         raise
 
