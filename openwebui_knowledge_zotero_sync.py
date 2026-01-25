@@ -128,10 +128,10 @@ def extract_text_from_file(filepath: Path) -> str:
 
 
 def encode_filename(filepath: str, kbdir_id: str) -> str:
-    """Encode filename with kbdir_id prefix and %% separators.
+    """Encode filename with %% separators (no kbdir_id prefix).
 
-    This encoding allows multiple sync directories to coexist in the same
-    knowledge base by prefixing each file with a unique directory identifier.
+    NOTE: This design assumes one sync directory per knowledge base.
+    Files are identified by their KB membership, not by a kbdir_id prefix.
     Path separators (/ and \\) are encoded as %% to create a flat namespace.
 
     Parameters
@@ -139,40 +139,42 @@ def encode_filename(filepath: str, kbdir_id: str) -> str:
     filepath : str
         Relative file path to encode
     kbdir_id : str
-        Knowledge base directory identifier
+        Knowledge base directory identifier (kept for backward compatibility,
+        but not used in encoding)
 
     Returns
     -------
     str
-        Encoded filename: kbdir_id%%path%%to%%file
+        Encoded filename: path%%to%%file
     """
     # Normalize path separators to forward slash
     normalized = filepath.replace("\\", "/")
     # Replace forward slashes with %%
     encoded_path = normalized.replace("/", "%%")
-    return f"{kbdir_id}%%{encoded_path}"
+    return encoded_path
 
 
 def decode_filename(encoded_name: str, kbdir_id: str) -> Optional[str]:
-    """Decode filename and verify it belongs to the specified kbdir_id.
+    """Decode filename by converting %% back to /.
+
+    NOTE: This assumes one sync directory per knowledge base.
+    The kbdir_id parameter is kept for backward compatibility but not used.
+    All files in a KB are assumed to belong to the same sync directory.
 
     Parameters
     ----------
     encoded_name : str
         Encoded filename to decode
     kbdir_id : str
-        Expected knowledge base directory identifier
+        Knowledge base directory identifier (unused, kept for compatibility)
 
     Returns
     -------
     Optional[str]
-        Decoded filename if it belongs to kbdir_id, None otherwise
+        Decoded filename with %% converted back to /
     """
-    prefix = f"{kbdir_id}%%"
-    if not encoded_name.startswith(prefix):
-        return None
-    # Remove prefix and convert %% back to /
-    return encoded_name[len(prefix) :].replace("%%", "/")
+    # Simply convert %% back to / - no prefix checking needed
+    return encoded_name.replace("%%", "/")
 
 
 def get_local_files(directory: Path, file_regex: Optional[str] = None) -> List[str]:
@@ -747,16 +749,17 @@ def get_remote_file_info(
     kb_files : List[Dict]
         List of files in knowledge base
     kbdir_id : str
-        Knowledge base directory identifier
+        Knowledge base directory identifier (unused, kept for compatibility)
 
     Returns
     -------
     tuple[bool, Optional[int]]
         (file_exists_in_kb, remote_updated_at)
     """
-    # Check original filename
+    # Check original filename - all files in KB belong to this sync
+    encoded_rel_path = encode_filename(rel_path, kbdir_id)
     file_in_kb = any(
-        decode_filename(f.get("meta", {}).get("name", ""), kbdir_id) == rel_path
+        f.get("meta", {}).get("name", "") == encoded_rel_path
         for f in kb_files
     )
     remote_updated_at = file_updated_at_map.get(rel_path)
@@ -768,8 +771,9 @@ def get_remote_file_info(
     # (created by force-duplicate feature which uploads PDF text as .txt)
     if rel_path.lower().endswith(".pdf"):
         txt_variant = rel_path[:-4] + ".txt"
+        encoded_txt_variant = encode_filename(txt_variant, kbdir_id)
         txt_in_kb = any(
-            decode_filename(f.get("meta", {}).get("name", ""), kbdir_id) == txt_variant
+            f.get("meta", {}).get("name", "") == encoded_txt_variant
             for f in kb_files
         )
         txt_updated_at = file_updated_at_map.get(txt_variant)
@@ -1418,10 +1422,8 @@ def sync_zotero_collection(
     )
     all_files = all_files_response.json()
 
-    # Build set of existing filenames for this kbdir_id and file IDs in KB
-    # We track both to handle duplicate content properly:
-    # - existing_files: filenames decoded for this kbdir_id (across ALL files)
-    # - kb_file_ids: all file IDs in this KB (for checking if duplicates are already present)
+    # Build set of existing filenames in KB and file IDs
+    # All files in the KB belong to this sync (one sync per KB assumption)
     existing_files = set()
     kb_file_ids = set()
     kb_files = []
@@ -1436,18 +1438,15 @@ def sync_zotero_collection(
                 kb_file_ids.add(file_id)
             # Track file for cleanup logic
             kb_files.append(file_info)
+            
+            # Decode filename to get original relative path
+            encoded_name = file_info.get("meta", {}).get("name", "")
+            decoded_name = decode_filename(encoded_name, kbdir_id)
+            if decoded_name:
+                existing_files.add(decoded_name)
 
-        # Track filename for this kbdir_id (check all files, not just those in this KB)
-        # This prevents re-uploading files that were uploaded but failed to be added to KB
-        # Keep %% format to match generate_zotero_filename() output
-        encoded_name = file_info.get("meta", {}).get("name", "")
-        prefix = f"{kbdir_id}%%"
-        if encoded_name.startswith(prefix):
-            filename_without_prefix = encoded_name[len(prefix) :]
-            existing_files.add(filename_without_prefix)
-
-    logger.info(f"Found {len(existing_files)} existing files for kbdir_id '{kbdir_id}'")
-    logger.info(f"Found {len(kb_file_ids)} total files in knowledge base {kb_id}")
+    logger.info(f"Found {len(existing_files)} existing files in knowledge base {kb_id}")
+    logger.info(f"Found {len(kb_file_ids)} total file IDs in knowledge base {kb_id}")
 
     # Step 4: Build content hash map for duplicate detection (unless method is "name")
     # This prevents uploading duplicate content under different filenames
@@ -1476,22 +1475,20 @@ def sync_zotero_collection(
 
     logger.info(f"Expecting {len(expected_filenames)} files based on Zotero collection")
 
-    # Build map of file_id -> set of kbdir_ids that use it
-    # This determines if a file is shared across sync directories
-    file_id_to_kbdirs: Dict[str, Set[str]] = {}
+    # Build map of file_id -> set of KB IDs that use it
+    # This determines if a file is shared across multiple knowledge bases
+    file_id_to_kbs: Dict[str, Set[str]] = {}
 
     for file_info in all_files:
         file_id = file_info.get("id")
         if not file_id:
             continue
 
-        encoded_name = file_info.get("meta", {}).get("name", "")
-        # Try to extract kbdir_id by splitting on first %%
-        if "%%" in encoded_name:
-            extracted_kbdir = encoded_name.split("%%")[0]
-            if file_id not in file_id_to_kbdirs:
-                file_id_to_kbdirs[file_id] = set()
-            file_id_to_kbdirs[file_id].add(extracted_kbdir)
+        collection_name = file_info.get("meta", {}).get("collection_name")
+        if collection_name:
+            if file_id not in file_id_to_kbs:
+                file_id_to_kbs[file_id] = set()
+            file_id_to_kbs[file_id].add(collection_name)
 
     # Check each file in KB for removal
     removed_count = 0
@@ -1506,16 +1503,15 @@ def sync_zotero_collection(
             kb_file = kb_file_data
 
         encoded_name = kb_file.get("meta", {}).get("name", "")
-        # Extract filename without kbdir_id prefix, keeping %% format to match expected_filenames
-        prefix = f"{kbdir_id}%%"
-        if not encoded_name.startswith(prefix):
-            # Not from our sync directory, skip
+        
+        # Decode filename to get original relative path
+        decoded_name = decode_filename(encoded_name, kbdir_id)
+        if not decoded_name:
+            # Failed to decode, skip
             continue
 
-        filename_without_prefix = encoded_name[len(prefix) :]
-
         # Check if this file is still expected in the collection
-        if filename_without_prefix in expected_filenames:
+        if decoded_name in expected_filenames:
             # File is still in Zotero collection, keep it
             continue
 
@@ -1523,25 +1519,25 @@ def sync_zotero_collection(
         file_id = kb_file.get("id")
 
         if not file_id:
-            logger.warning(f"Cannot remove file without ID: {filename_without_prefix}")
+            logger.warning(f"Cannot remove file without ID: {decoded_name}")
             continue
 
-        # Determine if file is used by other kbdir_ids
-        kbdirs_using_file = file_id_to_kbdirs.get(file_id, set())
-        is_shared = len(kbdirs_using_file) > 1 or (
-            len(kbdirs_using_file) == 1 and kbdir_id not in kbdirs_using_file
+        # Determine if file is used by other KBs
+        kbs_using_file = file_id_to_kbs.get(file_id, set())
+        is_shared = len(kbs_using_file) > 1 or (
+            len(kbs_using_file) == 1 and kb_id not in kbs_using_file
         )
 
         if is_shared:
-            # File is used by other sync directories - just remove from current KB
+            # File is used by other KBs - just remove from current KB
             if dry:
                 logger.info(
-                    f"[DRY RUN] Would remove from KB (shared with other dirs): {filename_without_prefix}"
+                    f"[DRY RUN] Would remove from KB (shared with other KBs): {decoded_name}"
                 )
                 removed_count += 1
             else:
                 logger.info(
-                    f"Removing from KB (shared with other dirs): {filename_without_prefix}"
+                    f"Removing from KB (shared with other KBs): {decoded_name}"
                 )
                 try:
                     remove_file_from_kb(
@@ -1549,27 +1545,27 @@ def sync_zotero_collection(
                     )
                     removed_count += 1
                     logger.info(
-                        f"Removed from KB (file preserved): {filename_without_prefix}"
+                        f"Removed from KB (file preserved): {decoded_name}"
                     )
                 except Exception as e:
                     logger.error(
-                        f"Failed to remove {filename_without_prefix} from KB: {e}"
+                        f"Failed to remove {decoded_name} from KB: {e}"
                     )
                     failed_files.append(
-                        (filename_without_prefix, f"remove from KB failed - {e}")
+                        (decoded_name, f"remove from KB failed - {e}")
                     )
                     if debug:
                         raise
         else:
-            # File is only used by this sync directory - delete entirely
+            # File is only used by this KB - delete entirely
             if dry:
                 logger.info(
-                    f"[DRY RUN] Would delete entirely (not in other dirs): {filename_without_prefix}"
+                    f"[DRY RUN] Would delete entirely (not in other KBs): {decoded_name}"
                 )
                 deleted_count += 1
             else:
                 logger.info(
-                    f"Deleting entirely (not in other dirs): {filename_without_prefix}"
+                    f"Deleting entirely (not in other KBs): {decoded_name}"
                 )
                 try:
                     remove_file_from_kb(
@@ -1577,12 +1573,12 @@ def sync_zotero_collection(
                     )
                     deleted_count += 1
                     logger.info(
-                        f"Deleted from KB and storage: {filename_without_prefix}"
+                        f"Deleted from KB and storage: {decoded_name}"
                     )
                 except Exception as e:
-                    logger.error(f"Failed to delete {filename_without_prefix}: {e}")
+                    logger.error(f"Failed to delete {decoded_name}: {e}")
                     failed_files.append(
-                        (filename_without_prefix, f"delete failed - {e}")
+                        (decoded_name, f"delete failed - {e}")
                     )
                     if debug:
                         raise
@@ -2056,17 +2052,16 @@ def sync_directory(
     logger.info(f"Tracked {len(kb_file_ids)} file IDs in knowledge base {kb_id}")
 
     # Build maps for efficient lookup
-    # Map decoded filename -> updated_at timestamp for files belonging to our kbdir_id
+    # All files in this KB belong to our sync (one sync per KB assumption)
     file_updated_at_map: Dict[str, int] = {}
-    # Map decoded filename -> file_id for files belonging to our kbdir_id
+    # Map decoded filename -> file_id
     file_id_by_name: Dict[str, str] = {}
 
-    for file_info in all_files:
+    for file_info in kb_files:
         encoded_name = file_info.get("meta", {}).get("name", "")
         decoded_name = decode_filename(encoded_name, kbdir_id)
 
-        if decoded_name is not None:
-            # This file belongs to our sync directory
+        if decoded_name:
             updated_at = file_info.get("updated_at")
             file_id = file_info.get("id")
 
@@ -2094,9 +2089,9 @@ def sync_directory(
         encoded_name = kb_file.get("meta", {}).get("name", "")
         decoded_name = decode_filename(encoded_name, kbdir_id)
 
-        if decoded_name is None:
-            # Not from our sync directory, skip
-            logger.debug(f"Skipping non-directory file: {encoded_name}")
+        if not decoded_name:
+            # Failed to decode filename, skip
+            logger.debug(f"Skipping file with invalid encoding: {encoded_name}")
             continue
 
         local_mtime = local_mtimes.get(decoded_name)
@@ -2507,7 +2502,7 @@ def cli():
     "--kbdir-id",
     envvar="OPENWEBUI_KBDIR_ID",
     required=True,
-    help="Unique identifier for this sync directory (used in filename encoding)",
+    help="Unique identifier for this sync directory (for logging/identification)",
 )
 @click.option(
     "--file-regex",
@@ -2647,7 +2642,7 @@ def sync(
 )
 @click.option(
     "--kbdir-id",
-    help="Unique identifier for this sync (defaults to collection name)",
+    help="Unique identifier for this sync (defaults to collection name, for logging/identification)",
 )
 @click.option(
     "--timeout",
