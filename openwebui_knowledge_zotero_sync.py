@@ -233,12 +233,15 @@ def make_request(
         try:
             # Try to parse response as JSON and extract error message
             error_json = response.json()
-            # Common error field names in APIs
-            error_detail = error_json.get(
-                "error", error_json.get("message", error_json.get("detail", ""))
-            )
-            # If error_detail is still empty or not a string, dump the whole JSON
-            if not error_detail or not isinstance(error_detail, str):
+            # Concatenate all common error field names to ensure we capture everything
+            error_parts = [
+                str(error_json.get("error", "")),
+                str(error_json.get("message", "")),
+                str(error_json.get("detail", "")),
+            ]
+            error_detail = " ".join(part for part in error_parts if part)
+            # If error_detail is still empty, dump the whole JSON
+            if not error_detail:
                 error_detail = json.dumps(error_json)
         except Exception:
             # If JSON parsing fails, get raw text response (truncated to 500 chars)
@@ -352,12 +355,13 @@ def upload_file(
                     error_text = ""
                     try:
                         error_json = e.response.json()
-                        error_text = str(
-                            error_json.get(
-                                "error",
-                                error_json.get("message", error_json.get("detail", "")),
-                            )
-                        )
+                        # Concatenate all possible error fields to ensure we don't miss anything
+                        error_parts = [
+                            str(error_json.get("error", "")),
+                            str(error_json.get("message", "")),
+                            str(error_json.get("detail", "")),
+                        ]
+                        error_text = " ".join(part for part in error_parts if part)
                     except:
                         error_text = e.response.text
 
