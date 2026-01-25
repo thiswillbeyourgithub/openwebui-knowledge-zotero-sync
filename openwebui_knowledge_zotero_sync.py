@@ -47,8 +47,18 @@ VERSION: str = "2.0.0"
 # Configure logger to write to both console and file
 # Detailed logs go to file, INFO+ goes to console
 logger.remove()  # Remove default handler
-logger.add(sys.stderr, level="INFO", format="<level>{message}</level>")
-logger.add("log.txt", rotation="10 MB", retention="10 days", level="DEBUG")
+logger.add(
+    sys.stderr,
+    level="INFO",
+    format="{file}:{function}:{line} - <level>{message}</level>",
+)
+logger.add(
+    "log.txt",
+    rotation="10 MB",
+    retention="10 days",
+    level="DEBUG",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {file}:{function}:{line} - {message}",
+)
 
 
 def get_file_mtime(filepath: Path) -> int:
