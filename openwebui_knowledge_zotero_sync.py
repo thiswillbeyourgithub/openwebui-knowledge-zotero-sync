@@ -708,6 +708,60 @@ def remove_file_from_kb(
     return response.json()
 
 
+def get_remote_file_info(
+    rel_path: str,
+    file_updated_at_map: Dict[str, int],
+    kb_files: List[Dict],
+    kbdir_id: str,
+) -> tuple[bool, Optional[int]]:
+    """Get remote file info, accounting for PDF->TXT conversion via force-duplicate.
+
+    When using method=name with force-duplicate, PDFs may be uploaded as .txt files
+    containing extracted text. This function checks both the original filename and
+    the .txt variant for PDFs to avoid re-uploading files that already exist.
+
+    Parameters
+    ----------
+    rel_path : str
+        Relative path to check
+    file_updated_at_map : Dict[str, int]
+        Map of decoded filename to updated_at timestamp
+    kb_files : List[Dict]
+        List of files in knowledge base
+    kbdir_id : str
+        Knowledge base directory identifier
+
+    Returns
+    -------
+    tuple[bool, Optional[int]]
+        (file_exists_in_kb, remote_updated_at)
+    """
+    # Check original filename
+    file_in_kb = any(
+        decode_filename(f.get("meta", {}).get("name", ""), kbdir_id) == rel_path
+        for f in kb_files
+    )
+    remote_updated_at = file_updated_at_map.get(rel_path)
+
+    if file_in_kb:
+        return True, remote_updated_at
+
+    # If original file is a PDF, also check for .txt version
+    # (created by force-duplicate feature which uploads PDF text as .txt)
+    if rel_path.lower().endswith(".pdf"):
+        txt_variant = rel_path[:-4] + ".txt"
+        txt_in_kb = any(
+            decode_filename(f.get("meta", {}).get("name", ""), kbdir_id) == txt_variant
+            for f in kb_files
+        )
+        txt_updated_at = file_updated_at_map.get(txt_variant)
+
+        if txt_in_kb:
+            return True, txt_updated_at
+
+    return False, None
+
+
 def get_file_content(file_id: str, base_url: str, api_key: str) -> str:
     """Download file content from OpenWebUI by file ID.
 
@@ -2113,12 +2167,11 @@ def sync_directory(
         sorted_local_files, desc="Uploading and adding files", disable=dry
     ):
         local_mtime = local_mtimes[rel_path]
-        remote_updated_at = file_updated_at_map.get(rel_path)
 
-        # Check if file is already in KB with current content
-        file_in_kb = any(
-            decode_filename(f.get("meta", {}).get("name", ""), kbdir_id) == rel_path
-            for f in kb_files
+        # Check if file exists in KB, accounting for PDF->TXT conversion
+        # When using force-duplicate, PDFs may be uploaded as .txt files
+        file_in_kb, remote_updated_at = get_remote_file_info(
+            rel_path, file_updated_at_map, kb_files, kbdir_id
         )
 
         if file_in_kb and remote_updated_at and local_mtime <= remote_updated_at:
