@@ -77,6 +77,56 @@ def get_file_mtime(filepath: Path) -> int:
     return int(filepath.stat().st_mtime)
 
 
+def extract_text_from_file(filepath: Path) -> str:
+    """Extract text content from a file, handling PDFs specially.
+
+    For PDF files, uses PyMuPDF (fitz) to extract text from all pages.
+    For text files (.txt, .md), reads directly as UTF-8.
+    For other files, attempts to read as text with fallback to latin-1.
+
+    Parameters
+    ----------
+    filepath : Path
+        Path to the file to extract text from
+
+    Returns
+    -------
+    str
+        Extracted text content
+
+    Raises
+    ------
+    Exception
+        If text extraction fails
+    """
+    # Detect file type by extension
+    suffix = filepath.suffix.lower()
+
+    if suffix == ".pdf":
+        # Extract text from PDF using PyMuPDF
+        logger.debug(f"Extracting text from PDF: {filepath}")
+        doc = fitz.open(str(filepath))
+        try:
+            text_content = "".join(page.get_text() for page in doc)
+            logger.debug(f"Extracted {len(text_content)} chars from PDF {filepath}")
+            return text_content
+        finally:
+            doc.close()
+    elif suffix in {".txt", ".md"}:
+        # Read text files directly
+        with open(filepath, "r", encoding="utf-8") as f:
+            return f.read()
+    else:
+        # Try to read as text with fallback
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                return f.read()
+        except UnicodeDecodeError:
+            with open(filepath, "rb") as f:
+                raw_bytes = f.read()
+                return raw_bytes.decode("latin-1", errors="replace")
+
+
 def encode_filename(filepath: str, kbdir_id: str) -> str:
     """Encode filename with kbdir_id prefix and %% separators.
 
@@ -384,28 +434,8 @@ def upload_file(
                             if text_content is not None:
                                 content_to_modify = text_content
                             else:
-                                # Read from original filepath
-                                with open(
-                                    filepath,
-                                    "r" if filepath.suffix == ".txt" else "rb",
-                                    encoding="utf-8"
-                                    if filepath.suffix == ".txt"
-                                    else None,
-                                ) as f:
-                                    if filepath.suffix == ".txt":
-                                        content_to_modify = f.read()
-                                    else:
-                                        try:
-                                            content_to_modify = f.read().decode("utf-8")
-                                        except (UnicodeDecodeError, AttributeError):
-                                            raw_bytes = f.read()
-                                            content_to_modify = (
-                                                raw_bytes.decode(
-                                                    "latin-1", errors="replace"
-                                                )
-                                                if isinstance(raw_bytes, bytes)
-                                                else ""
-                                            )
+                                # Extract text from original filepath (handles PDFs)
+                                content_to_modify = extract_text_from_file(filepath)
 
                             # Compute MD5 hash and append to content
                             md5_hash = hashlib.md5(
@@ -2229,20 +2259,8 @@ def sync_directory(
                 # Read file content
                 abs_path = directory / rel_path
                 try:
-                    if abs_path.suffix == ".txt":
-                        with open(abs_path, "r", encoding="utf-8") as f:
-                            content = f.read()
-                    else:
-                        with open(abs_path, "rb") as f:
-                            try:
-                                content = f.read().decode("utf-8")
-                            except UnicodeDecodeError:
-                                raw_bytes = f.read()
-                                content = (
-                                    raw_bytes.decode("latin-1", errors="replace")
-                                    if isinstance(raw_bytes, bytes)
-                                    else ""
-                                )
+                    # Extract text from file (handles PDFs properly)
+                    content = extract_text_from_file(abs_path)
 
                     # Append MD5 hash to content
                     md5_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
