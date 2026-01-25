@@ -19,8 +19,8 @@ This tool is under active development. There are many situations and file types 
   - Smart deletion: files shared across sync directories are removed from KB only, not deleted
   - **Note**: This tool is read-only with respect to Zotero - it will never modify, delete, or add anything to your Zotero collections or libraries
 - **Intelligent duplicate detection**
-  - Hash-based: compares content hashes to detect true duplicates (default)
-  - Name-based: faster but only checks filenames
+  - Name-based: faster but only checks filenames (default)
+  - Hash-based: compares content hashes to detect true duplicates
   - Automatic file reuse: if duplicate content already exists in OpenWebUI, adds existing file to KB instead of re-uploading
   - Saves storage space and processing time
 - **List knowledge bases** with simplified or full output
@@ -60,17 +60,17 @@ Configure via command-line options or environment variables:
 **Recommended**: Use `uv run` to execute the script - it will automatically handle all dependencies via the PEP 723 inline header.
 
 ```bash
-# Sync a directory with hash-based duplicate detection (default)
+# Sync a directory with name-based duplicate detection (default)
 uv run openwebui_knowledge_zotero_sync.py sync \
   --kb-name "My Knowledge" \
   --kbdir-id mydir \
   /path/to/dir
 
-# Sync with name-based duplicate detection (faster)
+# Sync with hash-based duplicate detection (slower but more accurate)
 uv run openwebui_knowledge_zotero_sync.py sync \
   --kb-name "My Knowledge" \
   --kbdir-id mydir \
-  --method name \
+  --method hash \
   /path/to/dir
 
 # Sync only markdown files using regex filter
@@ -152,13 +152,13 @@ Run any command with `--help` for more details.
    - Waits for processing to complete
 
 ### Duplicate Detection Methods
-- **`--method hash`** (default): Downloads all file content and compares SHA256 hashes
+- **`--method name`** (default): Only checks filenames
+  - Faster but may upload duplicate content under different names
+  - Useful when you're confident filenames are unique or for automated syncs
+- **`--method hash`**: Downloads all file content and compares SHA256 hashes
   - Slower but prevents duplicate content even if filenames differ
   - Automatically reuses existing files when duplicate content is found
   - Saves storage space and processing time
-- **`--method name`**: Only checks filenames
-  - Faster but may upload duplicate content under different names
-  - Useful when you're confident filenames are unique
 
 ## Troubleshooting
 
