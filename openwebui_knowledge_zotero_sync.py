@@ -1660,26 +1660,141 @@ def sync_zotero_collection(
                     pbar.update(1)
                     continue
 
-                # Add file to knowledge base
-                logger.info(f"Adding to knowledge base: {filename}")
-                try:
-                    add_result = add_file_to_kb(file_id, kb_id, base_url, api_key)
+                # Add file to knowledge base - with retry logic for duplicate content errors
+                # This handles cases where duplicate detection happens at add-to-KB stage
+                for add_attempt in range(11):  # Attempts 0-10
+                    if add_attempt > 0:
+                        # Previous attempt failed with duplicate content error
+                        # Delete the file we just uploaded and re-upload with modified content
+                        logger.warning(
+                            f"Deleting previously uploaded file {file_id} before retry"
+                        )
+                        try:
+                            make_request(
+                                method="DELETE",
+                                endpoint=f"/api/v1/files/{file_id}",
+                                base_url=base_url,
+                                api_key=api_key,
+                            )
+                            logger.debug(f"Deleted file {file_id}")
+                        except Exception as delete_error:
+                            logger.warning(
+                                f"Failed to delete file {file_id}: {delete_error}"
+                            )
+                            # Continue anyway - the re-upload might still work
 
-                    if not add_result.get("id"):
-                        logger.error(f"Failed to add {filename} to knowledge base")
-                        failed_files.append((filename, "add to KB failed - no KB ID"))
-                        pbar.update(1)
-                        continue
+                        # Modify content by appending MD5 hash
+                        md5_hash = hashlib.md5(text_content.encode("utf-8")).hexdigest()
+                        text_content = f"{text_content}\n\n<!-- MD5: {md5_hash} -->"
 
-                    logger.info(f"Added to KB successfully: {filename}")
-                    added_count += 1
-                except requests.exceptions.HTTPError as e:
-                    logger.error(f"Failed to add {filename} to knowledge base: {e}")
-                    failed_files.append((filename, f"add to KB failed - {e}"))
-                    if debug:
-                        raise
-                    pbar.update(1)
-                    continue
+                        # Re-upload with modified content
+                        logger.warning(
+                            f"Re-uploading {filename} with modified content (attempt {add_attempt + 1}/11)"
+                        )
+                        try:
+                            dummy_path = Path(filename)
+                            upload_result = upload_file(
+                                filepath=dummy_path,
+                                relative_path=filename,
+                                kbdir_id=kbdir_id,
+                                base_url=base_url,
+                                api_key=api_key,
+                                timeout=timeout,
+                                text_content=text_content,
+                                force_duplicate=force_duplicate,
+                            )
+
+                            if not upload_result.get("id"):
+                                logger.error(
+                                    f"Re-upload failed for {filename}: No file ID in response"
+                                )
+                                failed_files.append(
+                                    (filename, "re-upload failed - no file ID")
+                                )
+                                break  # Exit retry loop
+
+                            file_id = upload_result["id"]
+                            logger.info(f"Re-uploaded successfully: {filename} ({file_id})")
+                        except Exception as upload_error:
+                            logger.error(f"Re-upload failed for {filename}: {upload_error}")
+                            failed_files.append(
+                                (filename, f"re-upload failed - {upload_error}")
+                            )
+                            if debug:
+                                raise
+                            break  # Exit retry loop
+
+                    logger.info(f"Adding to knowledge base: {filename}")
+                    try:
+                        add_result = add_file_to_kb(file_id, kb_id, base_url, api_key)
+
+                        if not add_result.get("id"):
+                            logger.error(f"Failed to add {filename} to knowledge base")
+                            failed_files.append((filename, "add to KB failed - no KB ID"))
+                            break  # Exit retry loop
+
+                        logger.info(f"Added to KB successfully: {filename}")
+                        added_count += 1
+                        break  # Success - exit retry loop
+
+                    except requests.exceptions.HTTPError as e:
+                        # Extract error details
+                        error_text = ""
+                        try:
+                            error_json = e.response.json()
+                            error_parts = [
+                                str(error_json.get("error", "")),
+                                str(error_json.get("message", "")),
+                                str(error_json.get("detail", "")),
+                            ]
+                            error_text = " ".join(part for part in error_parts if part)
+                            if not error_text:
+                                error_text = json.dumps(error_json)
+                        except Exception:
+                            error_text = e.response.text[:500] if e.response.text else ""
+
+                        # Check if this is a duplicate content error at add-to-KB stage
+                        if (
+                            e.response.status_code == 400
+                            and "duplicate content" in error_text.lower()
+                        ):
+                            if not force_duplicate:
+                                logger.error(
+                                    f"Failed to add {filename} to knowledge base: {e}"
+                                )
+                                failed_files.append(
+                                    (
+                                        filename,
+                                        f"add to KB failed - duplicate content (use --force-duplicate to retry with modified content)",
+                                    )
+                                )
+                                break  # Exit retry loop
+                            elif add_attempt < 10:
+                                logger.warning(
+                                    f"Duplicate content detected when adding {filename} to KB, "
+                                    f"will retry with modified content (attempt {add_attempt + 2}/11)"
+                                )
+                                # Continue to next iteration of retry loop
+                                continue
+                            else:
+                                # Max attempts reached
+                                logger.error(
+                                    f"Failed to add {filename} to KB after 10 retry attempts with content modification"
+                                )
+                                failed_files.append(
+                                    (
+                                        filename,
+                                        f"add to KB failed - max retry attempts with content modification",
+                                    )
+                                )
+                                break  # Exit retry loop
+                        else:
+                            # Not a duplicate error - fail immediately
+                            logger.error(f"Failed to add {filename} to knowledge base: {e}")
+                            failed_files.append((filename, f"add to KB failed - {e}"))
+                            if debug:
+                                raise
+                            break  # Exit retry loop
 
                 pbar.update(1)
 
@@ -2079,11 +2194,87 @@ def sync_directory(
                     raise
                 continue
 
-        # Add file to knowledge base
-        if dry:
-            logger.info(f"[DRY RUN] Would add to knowledge base: {rel_path}")
-            added_count += 1
-        else:
+        # Add file to knowledge base - with retry logic for duplicate content errors
+        # This handles cases where duplicate detection happens at add-to-KB stage
+        # rather than upload stage
+        for add_attempt in range(11):  # Attempts 0-10
+            if add_attempt > 0:
+                # Previous attempt failed with duplicate content error
+                # Delete the file we just uploaded and re-upload with modified content
+                logger.warning(
+                    f"Deleting previously uploaded file {file_id} before retry"
+                )
+                try:
+                    make_request(
+                        method="DELETE",
+                        endpoint=f"/api/v1/files/{file_id}",
+                        base_url=base_url,
+                        api_key=api_key,
+                    )
+                    logger.debug(f"Deleted file {file_id}")
+                except Exception as delete_error:
+                    logger.warning(f"Failed to delete file {file_id}: {delete_error}")
+                    # Continue anyway - the re-upload might still work
+
+                # Read file content
+                abs_path = directory / rel_path
+                try:
+                    if abs_path.suffix == ".txt":
+                        with open(abs_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                    else:
+                        with open(abs_path, "rb") as f:
+                            try:
+                                content = f.read().decode("utf-8")
+                            except UnicodeDecodeError:
+                                raw_bytes = f.read()
+                                content = (
+                                    raw_bytes.decode("latin-1", errors="replace")
+                                    if isinstance(raw_bytes, bytes)
+                                    else ""
+                                )
+
+                    # Append MD5 hash to content
+                    md5_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
+                    modified_content = f"{content}\n\n<!-- MD5: {md5_hash} -->"
+
+                    # Re-upload with modified content
+                    logger.warning(
+                        f"Re-uploading {rel_path} with modified content (attempt {add_attempt + 1}/11)"
+                    )
+                    upload_result = upload_file(
+                        filepath=abs_path,  # Not used when text_content is provided
+                        relative_path=rel_path,
+                        kbdir_id=kbdir_id,
+                        base_url=base_url,
+                        api_key=api_key,
+                        timeout=timeout,
+                        text_content=modified_content,
+                        force_duplicate=force_duplicate,
+                    )
+
+                    if not upload_result.get("id"):
+                        logger.error(
+                            f"Re-upload failed for {rel_path}: No file ID in response"
+                        )
+                        failed_files.append((rel_path, "re-upload failed - no file ID"))
+                        break  # Exit retry loop
+
+                    file_id = upload_result["id"]
+                    logger.info(f"Re-uploaded successfully: {rel_path} ({file_id})")
+
+                except Exception as upload_error:
+                    logger.error(f"Re-upload failed for {rel_path}: {upload_error}")
+                    failed_files.append((rel_path, f"re-upload failed - {upload_error}"))
+                    if debug:
+                        raise
+                    break  # Exit retry loop
+
+            if dry:
+                logger.info(f"[DRY RUN] Would add to knowledge base: {rel_path}")
+                added_count += 1
+                break  # Exit retry loop
+
             logger.info(f"Adding to knowledge base: {rel_path}")
             try:
                 add_result = add_file_to_kb(file_id, kb_id, base_url, api_key)
@@ -2092,17 +2283,70 @@ def sync_directory(
                     logger.error(f"Failed to add {rel_path} to knowledge base")
                     logger.error(f"Response: {json.dumps(add_result, indent=2)}")
                     failed_files.append((rel_path, "add to KB failed - no KB ID"))
-                    continue
+                    break  # Exit retry loop
 
                 logger.info(f"Added to KB successfully: {rel_path}")
                 added_count += 1
+                break  # Success - exit retry loop
 
             except requests.exceptions.HTTPError as e:
-                logger.error(f"Failed to add {rel_path} to knowledge base: {e}")
-                failed_files.append((rel_path, f"add to KB failed - {e}"))
-                if debug:
-                    raise
-                continue
+                # Extract error details
+                error_text = ""
+                try:
+                    error_json = e.response.json()
+                    error_parts = [
+                        str(error_json.get("error", "")),
+                        str(error_json.get("message", "")),
+                        str(error_json.get("detail", "")),
+                    ]
+                    error_text = " ".join(part for part in error_parts if part)
+                    if not error_text:
+                        error_text = json.dumps(error_json)
+                except Exception:
+                    error_text = e.response.text[:500] if e.response.text else ""
+
+                # Check if this is a duplicate content error at add-to-KB stage
+                if (
+                    e.response.status_code == 400
+                    and "duplicate content" in error_text.lower()
+                ):
+                    if not force_duplicate:
+                        logger.error(
+                            f"Failed to add {rel_path} to knowledge base: {e}"
+                        )
+                        failed_files.append(
+                            (
+                                rel_path,
+                                f"add to KB failed - duplicate content (use --force-duplicate to retry with modified content)",
+                            )
+                        )
+                        break  # Exit retry loop
+                    elif add_attempt < 10:
+                        logger.warning(
+                            f"Duplicate content detected when adding {rel_path} to KB, "
+                            f"will retry with modified content (attempt {add_attempt + 2}/11)"
+                        )
+                        # Continue to next iteration of retry loop
+                        continue
+                    else:
+                        # Max attempts reached
+                        logger.error(
+                            f"Failed to add {rel_path} to KB after 10 retry attempts with content modification"
+                        )
+                        failed_files.append(
+                            (
+                                rel_path,
+                                f"add to KB failed - max retry attempts with content modification",
+                            )
+                        )
+                        break  # Exit retry loop
+                else:
+                    # Not a duplicate error - fail immediately
+                    logger.error(f"Failed to add {rel_path} to knowledge base: {e}")
+                    failed_files.append((rel_path, f"add to KB failed - {e}"))
+                    if debug:
+                        raise
+                    break  # Exit retry loop
 
     # Check for failures and raise exception if any occurred
     if failed_files and not dry:
