@@ -20,9 +20,10 @@ This tool is under active development. There are many situations and file types 
   - **Note**: This tool is read-only with respect to Zotero - it will never modify, delete, or add anything to your Zotero collections or libraries
 - **Intelligent duplicate detection**
   - Name-based: faster but only checks filenames (default)
-  - Hash-based: compares content hashes to detect true duplicates
+  - Hash-based: compares content hashes to detect true duplicates across all files
   - Automatic file reuse: if duplicate content already exists in OpenWebUI, adds existing file to KB instead of re-uploading
   - Saves storage space and processing time
+  - Force-duplicate mode: retries with modified content if duplicate errors occur
 - **List knowledge bases** with simplified or full output
 - **List all files** in OpenWebUI with optional content truncation
 - **Check file processing status** to find failed uploads
@@ -51,26 +52,38 @@ Configure via command-line options or environment variables:
 - `ZOTERO_API_KEY` - Zotero API authentication key (required for Zotero sync)
 
 **Sync Options**:
-- `--method` - Duplicate detection: 'hash' (content-based, slower) or 'name' (filename-based, faster)
+- `--method` - Duplicate detection: 'hash' (content-based, slower) or 'name' (filename-based, faster, default)
+- `--force-duplicate` - If duplicate content detected, modify it slightly (append MD5 hash) and retry up to 10 times
 - `--dry` - Preview changes without applying them
 - `--debug` - Enable debug mode with pdb debugger on exceptions
+- `--file-regex` - Filter files using regular expressions (directory sync only)
 
 ## Usage
 
 **Recommended**: Use `uv run` to execute the script - it will automatically handle all dependencies via the PEP 723 inline header.
 
 ```bash
-# Sync a directory with name-based duplicate detection (default)
+# Sync a directory with name-based duplicate detection (default, faster)
+# This only checks filenames - files with different names won't be detected as duplicates
 uv run openwebui_knowledge_zotero_sync.py sync \
   --kb-name "My Knowledge" \
   --kbdir-id mydir \
   /path/to/dir
 
-# Sync with hash-based duplicate detection (slower but more accurate)
+# Sync with hash-based duplicate detection (slower but detects all duplicates)
+# Downloads all file content to compute hashes - prevents duplicate content even with different filenames
 uv run openwebui_knowledge_zotero_sync.py sync \
   --kb-name "My Knowledge" \
   --kbdir-id mydir \
   --method hash \
+  /path/to/dir
+
+# Force upload even if duplicate content is detected
+# Modifies content slightly by appending MD5 hash, retries up to 10 times
+uv run openwebui_knowledge_zotero_sync.py sync \
+  --kb-name "My Knowledge" \
+  --kbdir-id mydir \
+  --force-duplicate \
   /path/to/dir
 
 # Sync only markdown files using regex filter
@@ -94,7 +107,8 @@ uv run openwebui_knowledge_zotero_sync.py sync-zotero \
   --zotero-hierarchy "Research%%Machine Learning" \
   --kb-name "ML Papers"
 
-# Sync Zotero collection with exclusions
+# Sync Zotero collection with exclusions (provide full paths)
+# Excludes "Archive" and "Drafts" subcollections from the "Research" collection
 uv run openwebui_knowledge_zotero_sync.py sync-zotero \
   --zotero-hierarchy "Research" \
   --zotero-exclude "Research%%Archive" \
@@ -113,7 +127,7 @@ uv run openwebui_knowledge_zotero_sync.py list-kb
 # List files in a specific knowledge base
 uv run openwebui_knowledge_zotero_sync.py list-kb-files --kb-name "My Knowledge"
 
-# Check file processing status
+# Check file processing status (shows files with non-completed status or empty content)
 uv run openwebui_knowledge_zotero_sync.py files-status
 
 # Clean up failed uploads (preview first)
@@ -130,35 +144,89 @@ Run any command with `--help` for more details.
 
 ## How Sync Works
 
+### File Naming Convention
+
+Files are encoded with a unique identifier prefix to support multiple sync directories:
+- **Format**: `kbdir-id%%path%%to%%file.txt`
+- **Example**: `mydir%%docs%%readme.txt` for file `docs/readme.txt` in sync directory with ID `mydir`
+- **Purpose**: Allows multiple directories to sync to the same knowledge base without filename conflicts
+
+For Zotero sync:
+- **Format**: `kbdir-id%%subcol1%%subcol2%%item_title.txt` or `kbdir-id%%subcol1&&subcol2%%item_title.txt` (items in multiple collections)
+- **Example**: `papers%%ML%%transformers%%Attention_Is_All_You_Need.txt`
+
 ### Directory Sync
 1. **Delete Phase**: Removes files from KB that:
    - No longer exist locally
    - Have been modified locally (local mtime > remote updated_at)
 2. **Upload Phase**: 
+   - Sorts files by size (smallest first) for faster initial feedback
    - Checks for duplicate content using hash comparison (if `--method hash`)
-   - Reuses existing files if content already exists in OpenWebUI
+   - Reuses existing files if content already exists in OpenWebUI (saves storage and processing time)
    - Uploads new/changed files and adds them to the KB
-   - Waits for OpenWebUI to finish processing each file before continuing
+   - Polls file status every 5 seconds until processing completes (content field becomes non-empty)
 
 ### Zotero Sync
 1. **Cleanup Phase**: Removes files from KB that are no longer in the Zotero collection
-   - If file is shared with other sync directories: removes from current KB only
+   - If file is shared with other sync directories: removes from current KB only  
    - If file is unique to this sync: deletes from KB and storage
 2. **Upload Phase**:
-   - Extracts text from PDF attachments
+   - Recursively processes collection and all subcollections (unless excluded)
+   - Attempts to use Zotero's fulltext API first (faster if indexed)
+   - Falls back to downloading PDF and extracting with PyMuPDF if needed
+   - Generates filenames encoding collection hierarchy: `kbdir%%subcol%%title.txt`
+   - Items in multiple subcollections: `kbdir%%subcol1&&subcol2%%title.txt`
    - Checks for duplicate content (if `--method hash`)
    - Reuses existing files if content already exists
    - Uploads new content with hierarchy-preserving filenames
-   - Waits for processing to complete
+   - Polls file status every 5 seconds until processing completes
 
 ### Duplicate Detection Methods
-- **`--method name`** (default): Only checks filenames
-  - Faster but may upload duplicate content under different names
-  - Useful when you're confident filenames are unique or for automated syncs
-- **`--method hash`**: Downloads all file content and compares SHA256 hashes
-  - Slower but prevents duplicate content even if filenames differ
+- **`--method name`** (default): Only checks encoded filenames
+  - Faster - no content download needed
+  - May upload duplicate content if files have different names
+  - Best for: automated syncs where you control filenames, or when speed matters more than storage
+  - Still reuses files if same filename exists (via kbdir-id prefix)
+  
+- **`--method hash`**: Downloads all file content and compares SHA256 hashes  
+  - Slower - downloads every file to compute hash
+  - Prevents duplicate content even if filenames differ
   - Automatically reuses existing files when duplicate content is found
-  - Saves storage space and processing time
+  - Best for: initial syncs, one-time migrations, or when minimizing storage is critical
+  - Saves storage space and processing time by avoiding redundant uploads and embeddings
+
+### Force Duplicate Mode
+
+The `--force-duplicate` flag handles cases where OpenWebUI rejects uploads due to duplicate content:
+- Appends MD5 hash of content as a comment: `\n\n<!-- MD5: abc123... -->`
+- Retries upload up to 10 times with different hashes
+- Useful when you need to force multiple copies of the same content
+- Works with both directory and Zotero sync
+
+## Multiple Sync Directories
+
+The `kbdir-id` parameter allows multiple directories to sync to the same knowledge base:
+
+```bash
+# Sync directory A
+uv run openwebui_knowledge_zotero_sync.py sync \
+  --kb-name "Shared KB" \
+  --kbdir-id dirA \
+  /path/to/dirA
+
+# Sync directory B to same KB
+uv run openwebui_knowledge_zotero_sync.py sync \
+  --kb-name "Shared KB" \
+  --kbdir-id dirB \
+  /path/to/dirB
+```
+
+Each file is prefixed with its `kbdir-id` (e.g., `dirA%%file.txt` vs `dirB%%file.txt`), preventing conflicts. When you sync directory A, only files with the `dirA%%` prefix are managed - files from directory B are left untouched.
+
+**Benefits**:
+- Share embeddings across multiple sources in one knowledge base
+- Organize content by source while querying everything together
+- Independent sync schedules for different directories
 
 ## Troubleshooting
 
