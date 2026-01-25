@@ -360,7 +360,17 @@ def upload_file(
     """
     # Retry loop to handle duplicate content errors
     for attempt in range(11):  # Attempts 0-10
-        encoded_name = encode_filename(relative_path, kbdir_id)
+        # If uploading text content extracted from a PDF, change extension to .txt
+        # This ensures the filename reflects what's actually being uploaded and
+        # allows get_remote_file_info() to correctly find these files
+        upload_path = relative_path
+        if text_content is not None and relative_path.lower().endswith(".pdf"):
+            upload_path = relative_path[:-4] + ".txt"
+            logger.debug(
+                f"Changing PDF filename to .txt for text upload: {upload_path}"
+            )
+
+        encoded_name = encode_filename(upload_path, kbdir_id)
         logger.debug(f"Uploading {relative_path} as {encoded_name}")
 
         # If text_content is provided, create a temporary file with that content
@@ -444,6 +454,14 @@ def upload_file(
                             text_content = (
                                 f"{content_to_modify}\n\n<!-- MD5: {md5_hash} -->"
                             )
+
+                            # Update relative_path to use .txt extension if this is a PDF
+                            # This ensures subsequent retries use the correct filename
+                            if relative_path.lower().endswith(".pdf"):
+                                relative_path = relative_path[:-4] + ".txt"
+                                logger.debug(
+                                    f"Updated relative_path to {relative_path} for retry"
+                                )
 
                             # Continue to next loop iteration (retry with modified content)
                             continue
