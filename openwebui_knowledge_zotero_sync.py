@@ -759,8 +759,7 @@ def get_remote_file_info(
     # Check original filename - all files in KB belong to this sync
     encoded_rel_path = encode_filename(rel_path, kbdir_id)
     file_in_kb = any(
-        f.get("meta", {}).get("name", "") == encoded_rel_path
-        for f in kb_files
+        f.get("meta", {}).get("name", "") == encoded_rel_path for f in kb_files
     )
     remote_updated_at = file_updated_at_map.get(rel_path)
 
@@ -773,8 +772,7 @@ def get_remote_file_info(
         txt_variant = rel_path[:-4] + ".txt"
         encoded_txt_variant = encode_filename(txt_variant, kbdir_id)
         txt_in_kb = any(
-            f.get("meta", {}).get("name", "") == encoded_txt_variant
-            for f in kb_files
+            f.get("meta", {}).get("name", "") == encoded_txt_variant for f in kb_files
         )
         txt_updated_at = file_updated_at_map.get(txt_variant)
 
@@ -1438,7 +1436,7 @@ def sync_zotero_collection(
                 kb_file_ids.add(file_id)
             # Track file for cleanup logic
             kb_files.append(file_info)
-            
+
             # Decode filename to get original relative path
             encoded_name = file_info.get("meta", {}).get("name", "")
             decoded_name = decode_filename(encoded_name, kbdir_id)
@@ -1503,7 +1501,7 @@ def sync_zotero_collection(
             kb_file = kb_file_data
 
         encoded_name = kb_file.get("meta", {}).get("name", "")
-        
+
         # Decode filename to get original relative path
         decoded_name = decode_filename(encoded_name, kbdir_id)
         if not decoded_name:
@@ -1536,24 +1534,16 @@ def sync_zotero_collection(
                 )
                 removed_count += 1
             else:
-                logger.info(
-                    f"Removing from KB (shared with other KBs): {decoded_name}"
-                )
+                logger.info(f"Removing from KB (shared with other KBs): {decoded_name}")
                 try:
                     remove_file_from_kb(
                         file_id, kb_id, base_url, api_key, delete_file=False
                     )
                     removed_count += 1
-                    logger.info(
-                        f"Removed from KB (file preserved): {decoded_name}"
-                    )
+                    logger.info(f"Removed from KB (file preserved): {decoded_name}")
                 except Exception as e:
-                    logger.error(
-                        f"Failed to remove {decoded_name} from KB: {e}"
-                    )
-                    failed_files.append(
-                        (decoded_name, f"remove from KB failed - {e}")
-                    )
+                    logger.error(f"Failed to remove {decoded_name} from KB: {e}")
+                    failed_files.append((decoded_name, f"remove from KB failed - {e}"))
                     if debug:
                         raise
         else:
@@ -1564,22 +1554,16 @@ def sync_zotero_collection(
                 )
                 deleted_count += 1
             else:
-                logger.info(
-                    f"Deleting entirely (not in other KBs): {decoded_name}"
-                )
+                logger.info(f"Deleting entirely (not in other KBs): {decoded_name}")
                 try:
                     remove_file_from_kb(
                         file_id, kb_id, base_url, api_key, delete_file=True
                     )
                     deleted_count += 1
-                    logger.info(
-                        f"Deleted from KB and storage: {decoded_name}"
-                    )
+                    logger.info(f"Deleted from KB and storage: {decoded_name}")
                 except Exception as e:
                     logger.error(f"Failed to delete {decoded_name}: {e}")
-                    failed_files.append(
-                        (decoded_name, f"delete failed - {e}")
-                    )
+                    failed_files.append((decoded_name, f"delete failed - {e}"))
                     if debug:
                         raise
 
