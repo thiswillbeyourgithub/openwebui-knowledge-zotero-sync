@@ -261,6 +261,7 @@ def upload_file(
     api_key: str,
     timeout: int = 600,
     text_content: Optional[str] = None,
+    force_duplicate: bool = False,
 ) -> Dict:
     """Upload file to OpenWebUI with encoded filename and wait for processing.
 
@@ -288,6 +289,9 @@ def upload_file(
     text_content : Optional[str]
         If provided, write this text to a temporary file and upload that instead
         of reading from filepath. This allows uploading text content directly.
+    force_duplicate : bool
+        If True and duplicate content is detected, modify content slightly by
+        appending its MD5 hash and retry up to 10 times (default: False)
 
     Returns
     -------
@@ -301,110 +305,239 @@ def upload_file(
     click.ClickException
         If processing fails or times out
     """
-    encoded_name = encode_filename(relative_path, kbdir_id)
-    logger.debug(f"Uploading {relative_path} as {encoded_name}")
+    # Retry loop to handle duplicate content errors
+    for attempt in range(11):  # Attempts 0-10
+        encoded_name = encode_filename(relative_path, kbdir_id)
+        logger.debug(f"Uploading {relative_path} as {encoded_name}")
 
-    # If text_content is provided, create a temporary file with that content
-    # This allows uploading text extracted from PDFs or other sources
-    temp_file = None
-    if text_content is not None:
-        temp_file = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False, encoding="utf-8"
-        )
-        temp_file.write(text_content)
-        temp_file.close()
-        filepath = Path(temp_file.name)
-        content_type = "text/plain"
-    else:
-        # Detect MIME type based on file extension
-        content_type, _ = mimetypes.guess_type(str(filepath))
-
-    logger.debug(f"Detected content type: {content_type}")
-
-    try:
-        if content_type == "text/plain":
-            file = open(filepath, "r", encoding="utf-8")
+        # If text_content is provided, create a temporary file with that content
+        # This allows uploading text extracted from PDFs or other sources
+        temp_file = None
+        if text_content is not None:
+            temp_file = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8"
+            )
+            temp_file.write(text_content)
+            temp_file.close()
+            filepath = Path(temp_file.name)
+            content_type = "text/plain"
         else:
-            file = open(filepath, "rb")
+            # Detect MIME type based on file extension
+            content_type, _ = mimetypes.guess_type(str(filepath))
 
-        if not content_type:
-            files = {"file": (encoded_name, file)}
-        else:
-            files = {"file": (encoded_name, file, content_type)}
+        logger.debug(f"Detected content type: {content_type}")
 
-        response = make_request(
-            method="POST",
-            endpoint="/api/v1/files/",
+        try:
+            if content_type == "text/plain":
+                file = open(filepath, "r", encoding="utf-8")
+            else:
+                file = open(filepath, "rb")
+
+            if not content_type:
+                files = {"file": (encoded_name, file)}
+            else:
+                files = {"file": (encoded_name, file, content_type)}
+
+            try:
+                response = make_request(
+                    method="POST",
+                    endpoint="/api/v1/files/",
+                    base_url=base_url,
+                    api_key=api_key,
+                    files=files,
+                )
+            except requests.exceptions.HTTPError as e:
+                # Check if this is a duplicate content error (400 status)
+                if e.response.status_code == 400:
+                    error_text = ""
+                    try:
+                        error_json = e.response.json()
+                        error_text = str(
+                            error_json.get(
+                                "error",
+                                error_json.get(
+                                    "message", error_json.get("detail", "")
+                                ),
+                            )
+                        )
+                    except:
+                        error_text = e.response.text
+
+                    # Check if error mentions duplicate content
+                    if "duplicate content" in error_text.lower():
+                        if not force_duplicate:
+                            raise click.ClickException(
+                                f"Duplicate content detected for {relative_path}. "
+                                f"Use --force-duplicate to bypass this by modifying content slightly. "
+                                f"Original error: {error_text}"
+                            )
+                        elif attempt < 10:
+                            # Modify content and retry
+                            logger.warning(
+                                f"Duplicate content detected for {relative_path}, "
+                                f"modifying content and retrying (attempt {attempt + 2}/11)"
+                            )
+
+                            # Get content to modify - read from text_content or file
+                            if text_content is not None:
+                                content_to_modify = text_content
+                            else:
+                                # Read from original filepath
+                                with open(
+                                    filepath,
+                                    "r" if filepath.suffix == ".txt" else "rb",
+                                    encoding="utf-8" if filepath.suffix == ".txt" else None,
+                                ) as f:
+                                    if filepath.suffix == ".txt":
+                                        content_to_modify = f.read()
+                                    else:
+                                        try:
+                                            content_to_modify = f.read().decode("utf-8")
+                                        except (UnicodeDecodeError, AttributeError):
+                                            raw_bytes = f.read()
+                                            content_to_modify = (
+                                                raw_bytes.decode("latin-1", errors="replace")
+                                                if isinstance(raw_bytes, bytes)
+                                                else ""
+                                            )
+
+                            # Compute MD5 hash and append to content
+                            md5_hash = hashlib.md5(
+                                content_to_modify.encode("utf-8")
+                            ).hexdigest()
+                            text_content = f"{content_to_modify}\n\n<!-- MD5: {md5_hash} -->"
+
+                            # Continue to next loop iteration (retry with modified content)
+                            continue
+                        else:
+                            # Max attempts (10) reached
+                            raise click.ClickException(
+                                f"Failed to upload {relative_path} after 10 retry attempts with content modification. "
+                                f"Original error: {error_text}"
+                            )
+
+                # Re-raise if not a duplicate content error
+                raise
+
+            out = response.json()
+            file_id = out.get("id")
+
+            if not file_id:
+                raise click.ClickException(
+                    f"Upload failed for {relative_path}: No file ID in response"
+                )
+
+            # Success - exit retry loop
+            break
+
+            # Wait for OpenWebUI to finish processing the file
+            logger.info(f"Waiting for {relative_path} to be processed...")
+            start_time = time.time()
+            poll_interval = 5  # Poll every 5 seconds
+
+            while True:
+                elapsed = time.time() - start_time
+
+                if elapsed > timeout:
+                    raise click.ClickException(
+                        f"Timeout waiting for {relative_path} to be processed (>{timeout}s)"
+                    )
+
+                # Get current file status
+                file_response = make_request(
+                    method="GET",
+                    endpoint=f"/api/v1/files/{file_id}",
+                    base_url=base_url,
+                    api_key=api_key,
+                )
+                file_data = file_response.json()
+
+                # Check processing status
+                data = file_data.get("data", {})
+                status = data.get("status")
+                content = data.get("content", "")
+
+                logger.debug(
+                    f"File {relative_path} status: {status}, content length: {len(content)}"
+                )
+
+                # Check if processing failed
+                if status == "failed":
+                    error_msg = data.get("error", "Unknown error")
+                    raise click.ClickException(
+                        f"Processing failed for {relative_path}: {error_msg}"
+                    )
+
+                # Check if processing is complete (content is non-empty)
+                if content:
+                    logger.info(
+                        f"File {relative_path} processed successfully in {elapsed:.1f}s"
+                    )
+                    return out
+
+                # Wait before next poll
+                logger.debug(
+                    f"File {relative_path} still processing... ({elapsed:.1f}s elapsed)"
+                )
+                time.sleep(poll_interval)
+        finally:
+            # Clean up temporary file if we created one
+            if temp_file is not None:
+                try:
+                    os.unlink(temp_file.name)
+                except Exception as e:
+                    logger.warning(f"Failed to delete temporary file: {e}")
+
+    # Wait for OpenWebUI to finish processing the file
+    logger.info(f"Waiting for {relative_path} to be processed...")
+    start_time = time.time()
+    poll_interval = 5  # Poll every 5 seconds
+
+    while True:
+        elapsed = time.time() - start_time
+
+        if elapsed > timeout:
+            raise click.ClickException(
+                f"Timeout waiting for {relative_path} to be processed (>{timeout}s)"
+            )
+
+        # Get current file status
+        file_response = make_request(
+            method="GET",
+            endpoint=f"/api/v1/files/{file_id}",
             base_url=base_url,
             api_key=api_key,
-            files=files,
+        )
+        file_data = file_response.json()
+
+        # Check processing status
+        data = file_data.get("data", {})
+        status = data.get("status")
+        content = data.get("content", "")
+
+        logger.debug(
+            f"File {relative_path} status: {status}, content length: {len(content)}"
         )
 
-        out = response.json()
-        file_id = out.get("id")
-
-        if not file_id:
+        # Check if processing failed
+        if status == "failed":
+            error_msg = data.get("error", "Unknown error")
             raise click.ClickException(
-                f"Upload failed for {relative_path}: No file ID in response"
+                f"Processing failed for {relative_path}: {error_msg}"
             )
 
-        # Wait for OpenWebUI to finish processing the file
-        logger.info(f"Waiting for {relative_path} to be processed...")
-        start_time = time.time()
-        poll_interval = 5  # Poll every 5 seconds
-
-        while True:
-            elapsed = time.time() - start_time
-
-            if elapsed > timeout:
-                raise click.ClickException(
-                    f"Timeout waiting for {relative_path} to be processed (>{timeout}s)"
-                )
-
-            # Get current file status
-            file_response = make_request(
-                method="GET",
-                endpoint=f"/api/v1/files/{file_id}",
-                base_url=base_url,
-                api_key=api_key,
+        # Check if processing is complete (content is non-empty)
+        if content:
+            logger.info(
+                f"File {relative_path} processed successfully in {elapsed:.1f}s"
             )
-            file_data = file_response.json()
+            return out
 
-            # Check processing status
-            data = file_data.get("data", {})
-            status = data.get("status")
-            content = data.get("content", "")
-
-            logger.debug(
-                f"File {relative_path} status: {status}, content length: {len(content)}"
-            )
-
-            # Check if processing failed
-            if status == "failed":
-                error_msg = data.get("error", "Unknown error")
-                raise click.ClickException(
-                    f"Processing failed for {relative_path}: {error_msg}"
-                )
-
-            # Check if processing is complete (content is non-empty)
-            if content:
-                logger.info(
-                    f"File {relative_path} processed successfully in {elapsed:.1f}s"
-                )
-                return out
-
-            # Wait before next poll
-            logger.debug(
-                f"File {relative_path} still processing... ({elapsed:.1f}s elapsed)"
-            )
-            time.sleep(poll_interval)
-    finally:
-        # Clean up temporary file if we created one
-        if temp_file is not None:
-            try:
-                os.unlink(temp_file.name)
-            except Exception as e:
-                logger.warning(f"Failed to delete temporary file: {e}")
+        # Wait before next poll
+        logger.debug(
+            f"File {relative_path} still processing... ({elapsed:.1f}s elapsed)"
+        )
+        time.sleep(poll_interval)
 
 
 def create_knowledge_base(
@@ -1096,6 +1229,7 @@ def sync_zotero_collection(
     method: str = "hash",
     dry: bool = False,
     debug: bool = False,
+    force_duplicate: bool = False,
 ) -> None:
     """Synchronize Zotero collection to OpenWebUI knowledge base.
 
@@ -1133,6 +1267,9 @@ def sync_zotero_collection(
         If True, show what would be done without making changes
     debug : bool
         If True, raise exceptions immediately instead of continuing
+    force_duplicate : bool
+        If True and duplicate content is detected, modify content slightly by
+        appending its MD5 hash and retry up to 10 times (default: False)
 
     Raises
     ------
@@ -1493,6 +1630,7 @@ def sync_zotero_collection(
                         api_key=api_key,
                         timeout=timeout,
                         text_content=text_content,
+                        force_duplicate=force_duplicate,
                     )
 
                     if not upload_result.get("id"):
@@ -1576,6 +1714,7 @@ def sync_directory(
     method: str = "hash",
     dry: bool = False,
     debug: bool = False,
+    force_duplicate: bool = False,
 ) -> None:
     """Synchronize directory contents with OpenWebUI knowledge base.
 
@@ -1608,6 +1747,9 @@ def sync_directory(
         If True, show what would be done without making changes
     debug : bool
         If True, raise exceptions immediately instead of continuing
+    force_duplicate : bool
+        If True and duplicate content is detected, modify content slightly by
+        appending its MD5 hash and retry up to 10 times (default: False)
 
     Raises
     ------
@@ -1902,7 +2044,13 @@ def sync_directory(
             abs_path = directory / rel_path
             try:
                 upload_result = upload_file(
-                    abs_path, rel_path, kbdir_id, base_url, api_key, timeout=timeout
+                    abs_path,
+                    rel_path,
+                    kbdir_id,
+                    base_url,
+                    api_key,
+                    timeout=timeout,
+                    force_duplicate=force_duplicate,
                 )
 
                 if not upload_result.get("id"):
@@ -2034,6 +2182,11 @@ def cli():
     help="Duplicate detection method: 'hash' checks content hashes (slower but accurate), 'name' only checks filenames (faster but may miss duplicates)",
 )
 @click.option(
+    "--force-duplicate",
+    is_flag=True,
+    help="If duplicate content is detected, modify it slightly by appending MD5 hash and retry up to 10 times",
+)
+@click.option(
     "--debug",
     is_flag=True,
     help="Enable debug mode - drop into pdb debugger on exceptions",
@@ -2052,6 +2205,7 @@ def sync(
     file_regex,
     timeout,
     method,
+    force_duplicate,
     dry,
     debug,
     directory,
@@ -2079,6 +2233,7 @@ def sync(
             method=method,
             dry=dry,
             debug=debug,
+            force_duplicate=force_duplicate,
         )
     except Exception:
         if debug:
@@ -2157,6 +2312,11 @@ def sync(
     help="Duplicate detection method: 'hash' checks content hashes (slower but accurate), 'name' only checks filenames (faster but may miss duplicates)",
 )
 @click.option(
+    "--force-duplicate",
+    is_flag=True,
+    help="If duplicate content is detected, modify it slightly by appending MD5 hash and retry up to 10 times",
+)
+@click.option(
     "--dry",
     is_flag=True,
     help="Dry run - show what would be done without making changes",
@@ -2179,6 +2339,7 @@ def sync_zotero(
     kbdir_id,
     timeout,
     method,
+    force_duplicate,
     dry,
     debug,
 ):
@@ -2285,6 +2446,7 @@ def sync_zotero(
             method=method,
             dry=dry,
             debug=debug,
+            force_duplicate=force_duplicate,
         )
     except Exception:
         if debug:
