@@ -2,6 +2,13 @@
 
 Fork from https://github.com/stoerr/openwebui-knowledgesync
 
+> [!WARNING]
+> **Open WebUI now has an official Knowledge Base sync tool: [open-webui/oikb](https://github.com/open-webui/oikb).**
+> It covers far more sources than this repo and is officially maintained. The one thing it
+> lacks is Zotero support, so I am working on contributing a Zotero connector to oikb and
+> plan to sunset this repository afterwards. If you are starting fresh, prefer oikb. This
+> repo will remain available in the meantime.
+
 **⚠️ Work in Progress**
 
 This tool is under active development. There are many situations and file types that don't work properly yet. Contributions are welcome! Please feel free to open issues or submit pull requests.
